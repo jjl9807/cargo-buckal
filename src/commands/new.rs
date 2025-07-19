@@ -2,6 +2,8 @@ use std::process::{Command, Stdio};
 
 use clap::Parser;
 
+use crate::RUST_CRATES_ROOT;
+
 #[derive(Parser, Debug)]
 pub struct NewArgs {
     pub path: String,
@@ -22,8 +24,6 @@ pub fn execute(args: &NewArgs) {
         .stderr(Stdio::inherit())
         .status()
         .expect("Failed to execute command");
-    std::fs::create_dir_all(format!("{}/third-party", args.path))
+    std::fs::create_dir_all(format!("{}/{}", args.path, RUST_CRATES_ROOT))
         .expect("Failed to create directory");
-    std::fs::File::create(format!("{}/third-party/BUCK", args.path))
-        .expect("Failed to create BUCK file in third-party directory");
 }

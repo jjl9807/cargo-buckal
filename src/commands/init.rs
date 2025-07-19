@@ -2,6 +2,8 @@ use std::process::{Command, Stdio};
 
 use clap::Parser;
 
+use crate::RUST_CRATES_ROOT;
+
 #[derive(Parser, Debug)]
 pub struct InitArgs {}
 
@@ -18,7 +20,5 @@ pub fn execute(_args: &InitArgs) {
         .stderr(Stdio::inherit())
         .status()
         .expect("Failed to execute command");
-    std::fs::create_dir("third-party").expect("Failed to create directory");
-    std::fs::File::create("third-party/BUCK")
-        .expect("Failed to create BUCK file in third-party directory");
+    std::fs::create_dir_all(RUST_CRATES_ROOT).expect("Failed to create directory");
 }

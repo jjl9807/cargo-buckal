@@ -8,7 +8,7 @@ pub fn get_buck2_root() -> String {
         .expect("Failed to execute command");
 
     if output.status.success() {
-        String::from_utf8_lossy(&output.stdout).into()
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
     } else {
         eprintln!("{}", String::from_utf8_lossy(&output.stderr));
         String::new()

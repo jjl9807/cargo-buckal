@@ -32,6 +32,9 @@ pub enum BuckalSubCommands {
 
     /// Clean up the buck-out directory
     Clean(crate::commands::clean::CleanArgs),
+
+    /// Add dependencies to a manifest file
+    Add(crate::commands::add::AddArgs),
 }
 
 impl Cli {
@@ -42,6 +45,7 @@ impl Cli {
                 BuckalSubCommands::Init(args) => crate::commands::init::execute(args),
                 BuckalSubCommands::New(args) => crate::commands::new::execute(args),
                 BuckalSubCommands::Clean(args) => crate::commands::clean::execute(args),
+                BuckalSubCommands::Add(args) => crate::commands::add::execute(args),
             },
         }
     }
