@@ -1,4 +1,8 @@
-use std::process::{Command, Stdio};
+use std::{
+    fs::OpenOptions,
+    io::Write,
+    process::{Command, Stdio},
+};
 
 use clap::Parser;
 
@@ -26,4 +30,12 @@ pub fn execute(args: &NewArgs) {
         .expect("Failed to execute command");
     std::fs::create_dir_all(format!("{}/{}", args.path, RUST_CRATES_ROOT))
         .expect("Failed to create directory");
+
+    let mut git_ignore = OpenOptions::new()
+        .create(false)
+        .write(true)
+        .append(true)
+        .open(format!("{}/.gitignore", args.path))
+        .expect("Failed to open .gitignore file");
+    writeln!(git_ignore, "/buck-out").expect("Failed to write to .gitignore file");
 }
