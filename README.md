@@ -13,7 +13,7 @@ cargo install --path .
 ## Usage
 
 ```
-Usage: cargo-buckal <COMMAND>
+Usage: cargo buckal <COMMAND>
 
 Commands:
   build  Compile the current package
