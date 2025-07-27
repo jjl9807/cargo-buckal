@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeSet as Set, HashMap},
+    collections::{BTreeMap as Map, BTreeSet as Set, HashMap},
     process::{Command, Stdio},
 };
 
@@ -48,7 +48,24 @@ pub fn execute(args: &AddArgs) {
         let package = packages_map.get(&node.id).unwrap().to_owned();
         let is_root = node.id == root.id;
 
-        // TODO: process cargo environment variables
+        // process cargo environment variables
+        let mut cargo_env: Map<String, String> = Map::new();
+        cargo_env.insert("CARGO_PKG_VERSION".to_owned(), package.version.to_string());
+        cargo_env.insert(
+            "CARGO_PKG_VERSION_MAJOR".to_owned(),
+            package.version.major.to_string(),
+        );
+        cargo_env.insert(
+            "CARGO_PKG_VERSION_MINOR".to_owned(),
+            package.version.minor.to_string(),
+        );
+        cargo_env.insert(
+            "CARGO_PKG_VERSION_PATCH".to_owned(),
+            package.version.patch.to_string(),
+        );
+        if let Some(links) = &package.links {
+            cargo_env.insert("CARGO_PKG_LINKS".to_owned(), links.to_string());
+        }
 
         if is_root {
             // process the root package
@@ -217,7 +234,11 @@ pub fn execute(args: &AddArgs) {
             let manifest_path = package.manifest_path.clone();
             let src_path = manifest_path.parent().unwrap().to_owned();
             let target_dir_path = Utf8PathBuf::from(get_buck2_root()).join(RUST_CRATES_ROOT);
-            copy(&src_path, &target_dir_path, &CopyOptions::new())
+            let copy_options = CopyOptions {
+                skip_exist: true,
+                ..Default::default()
+            };
+            copy(&src_path, &target_dir_path, &copy_options)
                 .expect("Failed to copy package sources");
 
             // Create the BUCK file for the package
@@ -285,6 +306,12 @@ pub fn execute(args: &AddArgs) {
                     }
                 }
             }
+
+            // Set Cargo environment variables
+            cargo_env.insert(
+                "CARGO_MANIFEST_DIR".to_owned(),
+                format!("{}/{}", RUST_CRATES_ROOT, buckal_name),
+            );
 
             // Check if the package has a build script
             let custom_build_target = package
