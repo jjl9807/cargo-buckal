@@ -234,7 +234,11 @@ pub fn execute(args: &AddArgs) {
             let manifest_path = package.manifest_path.clone();
             let src_path = manifest_path.parent().unwrap().to_owned();
             let target_dir_path = Utf8PathBuf::from(get_buck2_root()).join(RUST_CRATES_ROOT);
-            copy(&src_path, &target_dir_path, &CopyOptions::new())
+            let copy_options = CopyOptions {
+                skip_exist: true,
+                ..Default::default()
+            };
+            copy(&src_path, &target_dir_path, &copy_options)
                 .expect("Failed to copy package sources");
 
             // Create the BUCK file for the package
@@ -304,7 +308,10 @@ pub fn execute(args: &AddArgs) {
             }
 
             // Set Cargo environment variables
-            cargo_env.insert("CARGO_MANIFEST_DIR".to_owned(), format!("{}/{}", RUST_CRATES_ROOT, buckal_name));
+            cargo_env.insert(
+                "CARGO_MANIFEST_DIR".to_owned(),
+                format!("{}/{}", RUST_CRATES_ROOT, buckal_name),
+            );
 
             // Check if the package has a build script
             let custom_build_target = package
