@@ -28,7 +28,6 @@ pub fn execute(_args: &InitArgs) {
 
     let mut git_ignore = OpenOptions::new()
         .create(false)
-        .write(true)
         .append(true)
         .open(".gitignore")
         .expect("Failed to open .gitignore file");

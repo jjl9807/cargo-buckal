@@ -121,7 +121,7 @@ pub fn execute(args: &AddArgs) {
             rust_binary.crate_root = bin_src;
 
             // Set dependencies
-            let dep_prefix = format!("//{}/", RUST_CRATES_ROOT);
+            let dep_prefix = format!("//{RUST_CRATES_ROOT}/");
             for dep in &node.deps {
                 if let Some(dep_package) = packages_map.get(&dep.pkg) {
                     let dep_name = format!("{}-{}", dep_package.name, dep_package.version);
@@ -133,7 +133,7 @@ pub fn execute(args: &AddArgs) {
                         // Normal dependencies
                         rust_binary
                             .deps
-                            .insert(format!("{}{}:{}", dep_prefix, dep_name, dep_name));
+                            .insert(format!("{dep_prefix}{dep_name}:{dep_name}"));
                     }
                 }
             }
@@ -148,14 +148,10 @@ pub fn execute(args: &AddArgs) {
                 // process the build script in rust_binary
                 rust_binary.env.insert(
                     "OUT_DIR".to_owned(),
-                    format!("$(location :{}-build-script-run[out_dir])", buckal_name).to_owned(),
+                    format!("$(location :{buckal_name}-build-script-run[out_dir])").to_owned(),
                 );
                 rust_binary.rustc_flags.insert(
-                    format!(
-                        "@$(location :{}-build-script-run[rustc_flags])",
-                        buckal_name
-                    )
-                    .to_owned(),
+                    format!("@$(location :{buckal_name}-build-script-run[rustc_flags])").to_owned(),
                 );
                 buck_rules.push(Rule::CargoRustBinary(rust_binary));
 
@@ -198,7 +194,7 @@ pub fn execute(args: &AddArgs) {
                             // Build dependencies
                             buildscript_build
                                 .deps
-                                .insert(format!("{}{}:{}", dep_prefix, dep_name, dep_name));
+                                .insert(format!("{dep_prefix}{dep_name}:{dep_name}"));
                         }
                     }
                 }
@@ -206,7 +202,7 @@ pub fn execute(args: &AddArgs) {
 
                 // create the build script run rule
                 let buildscript_run = BuildscriptRun {
-                    name: format!("{}-build-script-run", buckal_name),
+                    name: format!("{buckal_name}-build-script-run"),
                     package_name: package.name.to_string(),
                     buildscript_rule: format!(":{}-{}", buckal_name, build_target.name),
                     features: Set::from_iter(node.features.iter().map(|f| f.to_string())),
@@ -243,7 +239,7 @@ pub fn execute(args: &AddArgs) {
 
             // Create the BUCK file for the package
             let buckal_name = format!("{}-{}", package.name, package.version);
-            let buck_path = target_dir_path.join(format!("{}/BUCK", buckal_name));
+            let buck_path = target_dir_path.join(format!("{buckal_name}/BUCK"));
             std::fs::File::create(&buck_path).expect("Failed to create BUCK file");
 
             // START: Generate the BUCK file content
@@ -290,7 +286,7 @@ pub fn execute(args: &AddArgs) {
             rust_library.crate_root = lib_src;
 
             // Set dependencies
-            let dep_prefix = format!("//{}/", RUST_CRATES_ROOT);
+            let dep_prefix = format!("//{RUST_CRATES_ROOT}/");
             for dep in &node.deps {
                 if let Some(dep_package) = packages_map.get(&dep.pkg) {
                     let dep_name = format!("{}-{}", dep_package.name, dep_package.version);
@@ -302,7 +298,7 @@ pub fn execute(args: &AddArgs) {
                         // Normal dependencies
                         rust_library
                             .deps
-                            .insert(format!("{}{}:{}", dep_prefix, dep_name, dep_name));
+                            .insert(format!("{dep_prefix}{dep_name}:{dep_name}"));
                     }
                 }
             }
@@ -310,7 +306,7 @@ pub fn execute(args: &AddArgs) {
             // Set Cargo environment variables
             cargo_env.insert(
                 "CARGO_MANIFEST_DIR".to_owned(),
-                format!("{}/{}", RUST_CRATES_ROOT, buckal_name),
+                format!("{RUST_CRATES_ROOT}/{buckal_name}"),
             );
 
             // Check if the package has a build script
@@ -323,14 +319,10 @@ pub fn execute(args: &AddArgs) {
                 // process the build script in rust_library
                 rust_library.env.insert(
                     "OUT_DIR".to_owned(),
-                    format!("$(location :{}-build-script-run[out_dir])", buckal_name).to_owned(),
+                    format!("$(location :{buckal_name}-build-script-run[out_dir])").to_owned(),
                 );
                 rust_library.rustc_flags.insert(
-                    format!(
-                        "@$(location :{}-build-script-run[rustc_flags])",
-                        buckal_name
-                    )
-                    .to_owned(),
+                    format!("@$(location :{buckal_name}-build-script-run[rustc_flags])").to_owned(),
                 );
                 buck_rules.push(Rule::CargoRustLibrary(rust_library));
 
@@ -373,7 +365,7 @@ pub fn execute(args: &AddArgs) {
                             // Build dependencies
                             buildscript_build
                                 .deps
-                                .insert(format!("{}{}:{}", dep_prefix, dep_name, dep_name));
+                                .insert(format!("{dep_prefix}{dep_name}:{dep_name}"));
                         }
                     }
                 }
@@ -381,7 +373,7 @@ pub fn execute(args: &AddArgs) {
 
                 // create the build script run rule
                 let buildscript_run = BuildscriptRun {
-                    name: format!("{}-build-script-run", buckal_name),
+                    name: format!("{buckal_name}-build-script-run"),
                     package_name: package.name.to_string(),
                     buildscript_rule: format!(":{}-{}", buckal_name, build_target.name),
                     features: Set::from_iter(node.features.iter().map(|f| f.to_string())),
