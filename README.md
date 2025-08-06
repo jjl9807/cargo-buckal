@@ -2,6 +2,8 @@
 
 Seamlessly build Cargo packages with Buck2.
 
+![demo](docs/demo.gif)
+
 ## Install
 
 ```
