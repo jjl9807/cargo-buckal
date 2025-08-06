@@ -37,7 +37,7 @@ pub fn execute(args: &BuildArgs) {
     let mut buck2_build_cmd = Command::new("buck2");
     buck2_build_cmd
         .arg("build")
-        .arg(format!("//{}...", relative_path))
+        .arg(format!("//{relative_path}..."))
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
 

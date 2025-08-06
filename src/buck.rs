@@ -73,6 +73,7 @@ pub struct BuildscriptRun {
     pub version: String,
 }
 
+#[derive(Default)]
 pub struct Glob {
     pub include: Set<String>,
     pub exclude: Set<String>,
@@ -104,15 +105,6 @@ impl Serialize for Glob {
             s.serialize_field("include", &self.include)?;
             s.serialize_field("exclude", &self.exclude)?;
             s.end()
-        }
-    }
-}
-
-impl Default for Glob {
-    fn default() -> Self {
-        Self {
-            include: Set::new(),
-            exclude: Set::new(),
         }
     }
 }
