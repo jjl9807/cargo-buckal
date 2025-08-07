@@ -6,7 +6,10 @@ use std::{
 use cargo_metadata::{MetadataCommand, camino::Utf8PathBuf};
 use clap::Parser;
 
-use crate::buckify::{buckify_dep_node, buckify_root_node, gen_buck_content, vendor_package};
+use crate::{
+    buckify::{buckify_dep_node, buckify_root_node, gen_buck_content, vendor_package},
+    utils::check_buck2_package,
+};
 
 #[derive(Parser, Debug)]
 pub struct AddArgs {
@@ -17,13 +20,7 @@ pub struct AddArgs {
 
 pub fn execute(args: &AddArgs) {
     // Check if the current directory is a valid Buck2 package
-    let cwd = std::env::current_dir().expect("Failed to get current directory");
-    let buck_file = cwd.join("BUCK");
-    assert!(
-        buck_file.exists(),
-        "{}",
-        format!("error: could not find `BUCK` in `{}`", cwd.display())
-    );
+    check_buck2_package();
 
     // execute the `cargo add` command to add a package dependency
     let status = Command::new("cargo")
@@ -55,6 +52,7 @@ pub fn execute(args: &AddArgs) {
 
         if is_root {
             // process the root package
+            let cwd = std::env::current_dir().expect("Failed to get current directory");
             let buck_path = Utf8PathBuf::from(cwd.to_str().unwrap()).join("BUCK");
 
             // Generate BUCK rules
@@ -66,10 +64,10 @@ pub fn execute(args: &AddArgs) {
         } else {
             // process third-party package
             // Vendor package sources
-            let vendor_path = vendor_package(&package);
+            let vendor_path = vendor_package(&package, false);
 
             // Create BUCK file
-            let buck_path = vendor_path.join(format!("{}-{}/BUCK", package.name, package.version));
+            let buck_path = vendor_path.join("BUCK");
             std::fs::File::create(&buck_path).expect("Failed to create BUCK file");
 
             // Generate BUCK rules

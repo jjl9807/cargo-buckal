@@ -1,13 +1,13 @@
 use std::collections::{BTreeMap as Map, BTreeSet as Set, HashMap};
 
-use cargo_metadata::{DependencyKind, Node, Package, PackageId, camino::Utf8PathBuf};
+use cargo_metadata::{DepKindInfo, DependencyKind, Node, Package, PackageId, camino::Utf8PathBuf};
 use fs_extra::dir::{CopyOptions, copy};
 use itertools::Itertools;
 
 use crate::{
     RUST_CRATES_ROOT,
     buck::{BuildscriptRun, CargoRustBinary, CargoRustLibrary, Load, Rule},
-    utils::get_buck2_root,
+    utils::{get_buck2_root, get_cfgs, get_target},
 };
 
 pub fn buckify_dep_node(
@@ -44,11 +44,7 @@ pub fn buckify_dep_node(
     } else {
         // Include all possible fields
         rust_library.srcs.include = Set::from(["**/*.*".to_owned()]);
-        rust_library.srcs.exclude = Set::from([
-            "LICENSE*".to_owned(),
-            "Cargo.*".to_owned(),
-            "BUCK".to_owned(),
-        ]);
+        rust_library.srcs.exclude = Set::from(["LICENSE*".to_owned(), "BUCK".to_owned()]);
         rust_library.env = gen_cargo_env(&package);
     }
 
@@ -57,8 +53,17 @@ pub fn buckify_dep_node(
     let lib_target = package
         .targets
         .iter()
-        .find(|t| t.kind.contains(&cargo_metadata::TargetKind::Lib))
+        .find(|t| {
+            t.kind.contains(&cargo_metadata::TargetKind::Lib)
+                || t.kind.contains(&cargo_metadata::TargetKind::ProcMacro)
+        })
         .expect("No library target found");
+    if lib_target
+        .kind
+        .contains(&cargo_metadata::TargetKind::ProcMacro)
+    {
+        rust_library.proc_macro = Some(true);
+    }
     rust_library.crate_root = lib_target
         .src_path
         .to_owned()
@@ -74,9 +79,9 @@ pub fn buckify_dep_node(
             if dep
                 .dep_kinds
                 .iter()
-                .any(|dk| dk.kind == DependencyKind::Normal)
+                .any(|dk| dk.kind == DependencyKind::Normal && check_dep_target(dk))
             {
-                // Normal dependencies
+                // Normal dependencies on current arch
                 rust_library
                     .deps
                     .insert(format!("{dep_prefix}{dep_name}:{dep_name}"));
@@ -117,11 +122,7 @@ pub fn buckify_dep_node(
         } else {
             // Include all possible fields
             buildscript_build.srcs.include = Set::from(["**/*.*".to_owned()]);
-            buildscript_build.srcs.exclude = Set::from([
-                "LICENSE*".to_owned(),
-                "Cargo.*".to_owned(),
-                "BUCK".to_owned(),
-            ]);
+            buildscript_build.srcs.exclude = Set::from(["LICENSE*".to_owned(), "BUCK".to_owned()]);
             buildscript_build.env = gen_cargo_env(&package);
         }
 
@@ -203,11 +204,7 @@ pub fn buckify_root_node(
     } else {
         // Include all possible fields
         rust_binary.srcs.include = Set::from(["**/*.*".to_owned()]);
-        rust_binary.srcs.exclude = Set::from([
-            "LICENSE*".to_owned(),
-            "Cargo.*".to_owned(),
-            "BUCK".to_owned(),
-        ]);
+        rust_binary.srcs.exclude = Set::from(["LICENSE*".to_owned(), "BUCK".to_owned()]);
         rust_binary.env = gen_cargo_env(&package);
     }
 
@@ -277,11 +274,7 @@ pub fn buckify_root_node(
         } else {
             // Include all possible fields
             buildscript_build.srcs.include = Set::from(["**/*.*".to_owned()]);
-            buildscript_build.srcs.exclude = Set::from([
-                "LICENSE*".to_owned(),
-                "Cargo.*".to_owned(),
-                "BUCK".to_owned(),
-            ]);
+            buildscript_build.srcs.exclude = Set::from(["LICENSE*".to_owned(), "BUCK".to_owned()]);
             buildscript_build.env = gen_cargo_env(&package);
         }
 
@@ -329,18 +322,26 @@ pub fn buckify_root_node(
     buck_rules
 }
 
-pub fn vendor_package(package: &Package) -> Utf8PathBuf {
+pub fn vendor_package(package: &Package, is_override: bool) -> Utf8PathBuf {
     // Vendor the package sources to `third-party/rust/crates/<package_name>-<version>`
     let manifest_path = package.manifest_path.clone();
     let src_path = manifest_path.parent().unwrap().to_owned();
-    let target_dir_path = Utf8PathBuf::from(get_buck2_root()).join(RUST_CRATES_ROOT);
+    let target_path = Utf8PathBuf::from(get_buck2_root()).join(format!(
+        "{RUST_CRATES_ROOT}/{}-{}",
+        package.name, package.version
+    ));
+    if !target_path.exists() {
+        std::fs::create_dir_all(&target_path).expect("Failed to create target directory");
+    }
     let copy_options = CopyOptions {
-        skip_exist: true,
+        skip_exist: !is_override,
+        overwrite: is_override,
+        content_only: true,
         ..Default::default()
     };
-    copy(&src_path, &target_dir_path, &copy_options).expect("Failed to copy package sources");
+    copy(&src_path, &target_path, &copy_options).expect("Failed to copy package sources");
 
-    target_dir_path
+    target_path
 }
 
 pub fn gen_cargo_env(package: &Package) -> Map<String, String> {
@@ -379,4 +380,16 @@ pub fn gen_buck_content(rules: &[Rule]) -> String {
 
     content.insert_str(0, "# @generated by `cargo buckal`\n\n");
     content
+}
+
+pub fn check_dep_target(dk: &DepKindInfo) -> bool {
+    if dk.target.is_none() {
+        return true; // No target specified
+    }
+
+    let platform = dk.target.as_ref().unwrap();
+    let target = get_target();
+    let cfgs = get_cfgs();
+
+    platform.matches(&target, &cfgs[..])
 }
