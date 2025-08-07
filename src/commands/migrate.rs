@@ -85,10 +85,10 @@ pub fn execute(args: &MigrateArgs) {
             if !dep.dep_kinds.iter().any(check_dep_target) {
                 continue; // Skip dependencies that do not match the target
             }
-            if let Some(next_node) = nodes_map.get(&dep.pkg) {
-                if visited.insert(&next_node.id.repr) {
-                    queue.push_back(next_node.clone());
-                }
+            if let Some(next_node) = nodes_map.get(&dep.pkg)
+                && visited.insert(&next_node.id.repr)
+            {
+                queue.push_back(next_node.clone());
             }
         }
     }
