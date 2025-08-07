@@ -71,6 +71,7 @@ dependencies = [
 name = "cargo-buckal"
 version = "0.0.0"
 dependencies = [
+ "cargo-platform",
  "cargo_metadata",
  "clap",
  "fs_extra",

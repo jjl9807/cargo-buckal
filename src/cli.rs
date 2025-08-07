@@ -35,6 +35,9 @@ pub enum BuckalSubCommands {
 
     /// Add dependencies to a manifest file
     Add(crate::commands::add::AddArgs),
+
+    /// Migrate existing Cargo packages to Buck2
+    Migrate(crate::commands::migrate::MigrateArgs),
 }
 
 impl Cli {
@@ -46,6 +49,7 @@ impl Cli {
                 BuckalSubCommands::New(args) => crate::commands::new::execute(args),
                 BuckalSubCommands::Clean(args) => crate::commands::clean::execute(args),
                 BuckalSubCommands::Add(args) => crate::commands::add::execute(args),
+                BuckalSubCommands::Migrate(args) => crate::commands::migrate::execute(args),
             },
         }
     }
