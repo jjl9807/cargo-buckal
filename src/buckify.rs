@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap as Map, BTreeSet as Set, HashMap};
+use std::{
+    collections::{BTreeMap as Map, BTreeSet as Set, HashMap},
+    vec,
+};
 
 use cargo_metadata::{DepKindInfo, DependencyKind, Node, Package, PackageId, camino::Utf8PathBuf};
 use fs_extra::dir::{CopyOptions, copy};
@@ -20,14 +23,6 @@ pub fn buckify_dep_node(
 
     // emit buck rules for lib target
     let mut buck_rules: Vec<Rule> = Vec::new();
-    buck_rules.push(Rule::Load(Load {
-        bzl: "@prelude//rust:cargo_buildscript.bzl".to_owned(),
-        items: Set::from(["buildscript_run".to_owned()]),
-    }));
-    buck_rules.push(Rule::Load(Load {
-        bzl: "@prelude//rust:cargo_package.bzl".to_owned(),
-        items: Set::from(["cargo".to_owned()]),
-    }));
 
     let mut rust_library = CargoRustLibrary {
         name: buckal_name.clone(),
@@ -43,8 +38,8 @@ pub fn buckify_dep_node(
         rust_library.srcs.include = Set::from(["**/*.rs".to_owned()]);
     } else {
         // Include all possible fields
-        rust_library.srcs.include = Set::from(["**/*.*".to_owned()]);
-        rust_library.srcs.exclude = Set::from(["LICENSE*".to_owned(), "BUCK".to_owned()]);
+        rust_library.srcs.include = Set::from(["**/**".to_owned()]);
+        rust_library.srcs.exclude = Set::from(["BUCK".to_owned()]);
         rust_library.env = gen_cargo_env(&package);
     }
 
@@ -121,8 +116,8 @@ pub fn buckify_dep_node(
                 Set::from(["**/*.rs".to_owned(), "build.rs".to_owned()]);
         } else {
             // Include all possible fields
-            buildscript_build.srcs.include = Set::from(["**/*.*".to_owned()]);
-            buildscript_build.srcs.exclude = Set::from(["LICENSE*".to_owned(), "BUCK".to_owned()]);
+            buildscript_build.srcs.include = Set::from(["**/**".to_owned()]);
+            buildscript_build.srcs.exclude = Set::from(["BUCK".to_owned()]);
             buildscript_build.env = gen_cargo_env(&package);
         }
 
@@ -159,6 +154,7 @@ pub fn buckify_dep_node(
             buildscript_rule: format!(":{}-{}", buckal_name, build_target.name),
             features: Set::from_iter(node.features.iter().map(|f| f.to_string())),
             version: package.version.to_string(),
+            local_manifest_dir: "**".to_owned(),
             ..Default::default()
         };
         buck_rules.push(Rule::BuildscriptRun(buildscript_run));
@@ -180,14 +176,6 @@ pub fn buckify_root_node(
 
     // emit buck rules for bin target
     let mut buck_rules: Vec<Rule> = Vec::new();
-    buck_rules.push(Rule::Load(Load {
-        bzl: "@prelude//rust:cargo_buildscript.bzl".to_owned(),
-        items: Set::from(["buildscript_run".to_owned()]),
-    }));
-    buck_rules.push(Rule::Load(Load {
-        bzl: "@prelude//rust:cargo_package.bzl".to_owned(),
-        items: Set::from(["cargo".to_owned()]),
-    }));
 
     let mut rust_binary = CargoRustBinary {
         name: buckal_name.clone(),
@@ -203,8 +191,8 @@ pub fn buckify_root_node(
         rust_binary.srcs.include = Set::from(["**/*.rs".to_owned()]);
     } else {
         // Include all possible fields
-        rust_binary.srcs.include = Set::from(["**/*.*".to_owned()]);
-        rust_binary.srcs.exclude = Set::from(["LICENSE*".to_owned(), "BUCK".to_owned()]);
+        rust_binary.srcs.include = Set::from(["**/**".to_owned()]);
+        rust_binary.srcs.exclude = Set::from(["BUCK".to_owned()]);
         rust_binary.env = gen_cargo_env(&package);
     }
 
@@ -273,8 +261,8 @@ pub fn buckify_root_node(
                 Set::from(["**/*.rs".to_owned(), "build.rs".to_owned()]);
         } else {
             // Include all possible fields
-            buildscript_build.srcs.include = Set::from(["**/*.*".to_owned()]);
-            buildscript_build.srcs.exclude = Set::from(["LICENSE*".to_owned(), "BUCK".to_owned()]);
+            buildscript_build.srcs.include = Set::from(["**/**".to_owned()]);
+            buildscript_build.srcs.exclude = Set::from(["BUCK".to_owned()]);
             buildscript_build.env = gen_cargo_env(&package);
         }
 
@@ -311,6 +299,7 @@ pub fn buckify_root_node(
             buildscript_rule: format!(":{}-{}", buckal_name, build_target.name),
             features: Set::from_iter(node.features.iter().map(|f| f.to_string())),
             version: package.version.to_string(),
+            local_manifest_dir: "**".to_owned(),
             ..Default::default()
         };
         buck_rules.push(Rule::BuildscriptRun(buildscript_run));
@@ -347,6 +336,18 @@ pub fn vendor_package(package: &Package, is_override: bool) -> Utf8PathBuf {
 pub fn gen_cargo_env(package: &Package) -> Map<String, String> {
     // Generate cargo environment variables
     let mut cargo_env: Map<String, String> = Map::new();
+    cargo_env.insert("CARGO_CRATE_NAME".to_owned(), package.name.to_string());
+    cargo_env.insert("CARGO_MANIFEST_DIR".to_owned(), ".".to_owned());
+    cargo_env.insert("CARGO_PKG_AUTHORS".to_owned(), package.authors.join(":"));
+    cargo_env.insert(
+        "CARGO_PKG_DESCRIPTION".to_owned(),
+        package.description.clone().unwrap_or_default(),
+    );
+    cargo_env.insert("CARGO_PKG_NAME".to_owned(), package.name.to_string());
+    cargo_env.insert(
+        "CARGO_PKG_REPOSITORY".to_owned(),
+        package.repository.clone().unwrap_or_default(),
+    );
     cargo_env.insert("CARGO_PKG_VERSION".to_owned(), package.version.to_string());
     cargo_env.insert(
         "CARGO_PKG_VERSION_MAJOR".to_owned(),
@@ -360,24 +361,43 @@ pub fn gen_cargo_env(package: &Package) -> Map<String, String> {
         "CARGO_PKG_VERSION_PATCH".to_owned(),
         package.version.patch.to_string(),
     );
+    cargo_env.insert(
+        "CARGO_PKG_VERSION_PRE".to_owned(),
+        package.version.pre.to_string(),
+    );
     if let Some(links) = &package.links {
         cargo_env.insert("CARGO_PKG_LINKS".to_owned(), links.to_string());
     }
-    cargo_env.insert(
-        "CARGO_MANIFEST_DIR".to_owned(),
-        format!("{RUST_CRATES_ROOT}/{}-{}", package.name, package.version),
-    );
 
     cargo_env
 }
 
 pub fn gen_buck_content(rules: &[Rule]) -> String {
+    let loads: Vec<Rule> = vec![
+        Rule::Load(Load {
+            bzl: "@prelude//rust:cargo_buildscript.bzl".to_owned(),
+            items: Set::from(["buildscript_run".to_owned()]),
+        }),
+        Rule::Load(Load {
+            bzl: "@prelude//rust:cargo_package.bzl".to_owned(),
+            items: Set::from(["cargo".to_owned()]),
+        }),
+    ];
+
+    let loads_string = loads
+        .iter()
+        .map(serde_starlark::to_string)
+        .map(Result::unwrap)
+        .join("");
+
     let mut content = rules
         .iter()
         .map(serde_starlark::to_string)
         .map(Result::unwrap)
         .join("\n");
 
+    content.insert(0, '\n');
+    content.insert_str(0, &loads_string);
     content.insert_str(0, "# @generated by `cargo buckal`\n\n");
     content
 }
