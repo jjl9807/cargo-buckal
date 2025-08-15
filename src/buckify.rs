@@ -347,6 +347,12 @@ pub fn vendor_package(package: &Package, is_override: bool) -> Utf8PathBuf {
 pub fn gen_cargo_env(package: &Package) -> Map<String, String> {
     // Generate cargo environment variables
     let mut cargo_env: Map<String, String> = Map::new();
+    cargo_env.insert("CARGO_CRATE_NAME".to_owned(), package.name.to_string());
+    cargo_env.insert(
+        "CARGO_MANIFEST_DIR".to_owned(),
+        ".".to_owned(),
+    );
+    cargo_env.insert("CARGO_PKG_NAME".to_owned(), package.name.to_string());
     cargo_env.insert("CARGO_PKG_VERSION".to_owned(), package.version.to_string());
     cargo_env.insert(
         "CARGO_PKG_VERSION_MAJOR".to_owned(),
@@ -360,13 +366,13 @@ pub fn gen_cargo_env(package: &Package) -> Map<String, String> {
         "CARGO_PKG_VERSION_PATCH".to_owned(),
         package.version.patch.to_string(),
     );
+    cargo_env.insert(
+        "CARGO_PKG_VERSION_PRE".to_owned(),
+        package.version.pre.to_string(),
+    );
     if let Some(links) = &package.links {
         cargo_env.insert("CARGO_PKG_LINKS".to_owned(), links.to_string());
     }
-    cargo_env.insert(
-        "CARGO_MANIFEST_DIR".to_owned(),
-        format!("{RUST_CRATES_ROOT}/{}-{}", package.name, package.version),
-    );
 
     cargo_env
 }
