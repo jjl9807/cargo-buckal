@@ -71,6 +71,7 @@ pub struct BuildscriptRun {
     #[serde(skip_serializing_if = "Set::is_empty")]
     pub features: Set<String>,
     pub version: String,
+    pub local_manifest_dir: String,
 }
 
 #[derive(Default)]
