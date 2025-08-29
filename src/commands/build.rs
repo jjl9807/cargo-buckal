@@ -5,7 +5,7 @@ use std::{
 
 use clap::Parser;
 
-use crate::utils::get_buck2_root;
+use crate::utils::{ensure_buck2_installed, get_buck2_root};
 
 #[derive(Parser, Debug)]
 pub struct BuildArgs {
@@ -15,6 +15,12 @@ pub struct BuildArgs {
 }
 
 pub fn execute(args: &BuildArgs) {
+    // Ensure Buck2 is installed before proceeding
+    if let Err(e) = ensure_buck2_installed() {
+        eprintln!("Error: {}", e);
+        std::process::exit(1);
+    }
+
     // Get the root directory of the Buck2 project
     let buck2_root = get_buck2_root();
     if buck2_root.is_empty() {

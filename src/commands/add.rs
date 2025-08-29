@@ -8,7 +8,7 @@ use clap::Parser;
 
 use crate::{
     buckify::{buckify_dep_node, buckify_root_node, gen_buck_content, vendor_package},
-    utils::check_buck2_package,
+    utils::{check_buck2_package, ensure_buck2_installed},
 };
 
 #[derive(Parser, Debug)]
@@ -19,6 +19,12 @@ pub struct AddArgs {
 }
 
 pub fn execute(args: &AddArgs) {
+    // Ensure Buck2 is installed before proceeding
+    if let Err(e) = ensure_buck2_installed() {
+        eprintln!("Error: {}", e);
+        std::process::exit(1);
+    }
+
     // Check if the current directory is a valid Buck2 package
     check_buck2_package();
 

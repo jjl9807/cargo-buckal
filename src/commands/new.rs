@@ -6,7 +6,7 @@ use std::{
 
 use clap::Parser;
 
-use crate::RUST_CRATES_ROOT;
+use crate::{RUST_CRATES_ROOT, utils::ensure_buck2_installed};
 
 #[derive(Parser, Debug)]
 pub struct NewArgs {
@@ -14,6 +14,12 @@ pub struct NewArgs {
 }
 
 pub fn execute(args: &NewArgs) {
+    // Ensure Buck2 is installed before proceeding
+    if let Err(e) = ensure_buck2_installed() {
+        eprintln!("Error: {}", e);
+        std::process::exit(1);
+    }
+
     let _status = Command::new("cargo")
         .arg("new")
         .arg(&args.path)

@@ -1,13 +1,67 @@
-use std::{process::Command, str::FromStr};
+use std::{io, process::Command, str::FromStr};
 
 use cargo_platform::Cfg;
+use colored::Colorize;
+
+pub fn check_buck2_installed() -> bool {
+    Command::new("buck2")
+        .arg("--help")
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+pub fn prompt_buck2_installation() -> io::Result<bool> {
+    println!();
+    println!(
+        "{} {}",
+        "⚠️".yellow(),
+        "Buck2 is not installed or not found in PATH.".yellow()
+    );
+    println!(
+        "{} {}",
+        "🔧".blue(),
+        "Buck2 is required to use cargo buckal.".blue()
+    );
+    println!();
+    println!(
+        "{} {}",
+        "📚".green(),
+        "Please install Buck2 by following the official installation guide:".green()
+    );
+    println!(
+        "   {}",
+        "https://buck2.build/docs/getting_started/install/"
+            .cyan()
+            .underline()
+    );
+    println!();
+    println!(
+        "{} {}",
+        "🔄".bright_blue(),
+        "After installation, please run this command again.".bright_blue()
+    );
+    println!();
+
+    Ok(false) // Always return false since we're not installing automatically
+}
+
+pub fn ensure_buck2_installed() -> io::Result<()> {
+    if !check_buck2_installed() {
+        prompt_buck2_installation()?;
+        return Err(io::Error::other(
+            "Buck2 is required but not installed. Please install Buck2 and try again.",
+        ));
+    }
+    Ok(())
+}
 
 pub fn get_buck2_root() -> String {
     // This function should return the root directory of the Buck2 project.
     let output = Command::new("buck2")
         .arg("root")
         .output()
-        .expect("Failed to execute command");
+        .expect("Failed to execute buck2 command");
 
     if output.status.success() {
         String::from_utf8_lossy(&output.stdout).trim().to_string()

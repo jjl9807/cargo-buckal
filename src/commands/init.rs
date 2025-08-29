@@ -6,12 +6,18 @@ use std::{
 
 use clap::Parser;
 
-use crate::RUST_CRATES_ROOT;
+use crate::{RUST_CRATES_ROOT, utils::ensure_buck2_installed};
 
 #[derive(Parser, Debug)]
 pub struct InitArgs {}
 
 pub fn execute(_args: &InitArgs) {
+    // Ensure Buck2 is installed before proceeding
+    if let Err(e) = ensure_buck2_installed() {
+        eprintln!("Error: {}", e);
+        std::process::exit(1);
+    }
+
     let _status = Command::new("cargo")
         .arg("init")
         .stdout(Stdio::inherit())

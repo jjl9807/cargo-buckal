@@ -7,7 +7,7 @@ use crate::{
     buckify::{
         buckify_dep_node, buckify_root_node, check_dep_target, gen_buck_content, vendor_package,
     },
-    utils::check_buck2_package,
+    utils::{check_buck2_package, ensure_buck2_installed},
 };
 
 #[derive(Parser, Debug)]
@@ -22,6 +22,12 @@ pub struct MigrateArgs {
 }
 
 pub fn execute(args: &MigrateArgs) {
+    // Ensure Buck2 is installed before proceeding
+    if let Err(e) = ensure_buck2_installed() {
+        eprintln!("Error: {}", e);
+        std::process::exit(1);
+    }
+
     // Check if the current directory is a valid Buck2 package
     check_buck2_package();
 
