@@ -101,6 +101,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_starlark",
+ "toml",
 ]
 
 [[package]]

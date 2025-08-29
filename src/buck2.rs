@@ -3,6 +3,8 @@ use std::{
     process::{Command, Stdio},
 };
 
+use crate::config::Config;
+
 pub struct Buck2Command {
     command: Command,
 }
@@ -10,7 +12,8 @@ pub struct Buck2Command {
 impl Buck2Command {
     /// Create a new Buck2 command
     pub fn new() -> Self {
-        let mut command = Command::new("buck2");
+        let config = Config::load();
+        let mut command = Command::new(&config.buck2_binary);
         command.stdout(Stdio::inherit()).stderr(Stdio::inherit());
         Self { command }
     }

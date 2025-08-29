@@ -26,3 +26,17 @@ Commands:
 Options:
   -h, --help  Print help
 ```
+
+## Configuration
+
+You can configure cargo-buckal by creating a configuration file at `~/.config/buckal/config.toml`.
+
+### Custom Buck2 Binary Path
+
+If you have buck2 installed in a custom location, you can specify the path:
+
+```toml
+buck2_binary = "/path/to/your/buck2"
+```
+
+If no configuration file exists, cargo-buckal will use `buck2` (searches your PATH).

@@ -55,11 +55,11 @@ pub fn prompt_buck2_installation() -> io::Result<bool> {
             // Check if installation was successful
             if check_buck2_installed() {
                 println!("{} {}", "🎉".green(), "Buck2 is now available!".green());
-                return Ok(true);
+                Ok(true)
             } else {
                 println!("{} {}", "⚠️".yellow(), "Buck2 installation completed but not found in PATH.".yellow());
                 println!("{} {}", "💡".bright_blue(), "You may need to restart your terminal or source your shell profile.".bright_blue());
-                return Ok(false);
+                Ok(false)
             }
         }
         "📖 Exit and show manual installation guide" => {
