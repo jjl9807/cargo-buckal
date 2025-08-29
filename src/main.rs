@@ -1,7 +1,9 @@
 mod buck;
+mod buck2;
 mod buckify;
 mod cli;
 mod commands;
+mod config;
 mod utils;
 
 use clap::Parser;

@@ -6,7 +6,7 @@ use std::{
 
 use clap::Parser;
 
-use crate::RUST_CRATES_ROOT;
+use crate::{RUST_CRATES_ROOT, buck2::Buck2Command, utils::ensure_buck2_installed};
 
 #[derive(Parser, Debug)]
 pub struct NewArgs {
@@ -14,6 +14,12 @@ pub struct NewArgs {
 }
 
 pub fn execute(args: &NewArgs) {
+    // Ensure Buck2 is installed before proceeding
+    if let Err(e) = ensure_buck2_installed() {
+        eprintln!("Error: {}", e);
+        std::process::exit(1);
+    }
+
     let _status = Command::new("cargo")
         .arg("new")
         .arg(&args.path)
@@ -21,13 +27,11 @@ pub fn execute(args: &NewArgs) {
         .stderr(Stdio::inherit())
         .status()
         .expect("Failed to execute command");
-    let _status = Command::new("buck2")
-        .arg("init")
-        .arg(&args.path)
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .status()
-        .expect("Failed to execute command");
+
+    if let Err(e) = Buck2Command::init().arg(&args.path).execute() {
+        eprintln!("Failed to execute buck2 init: {}", e);
+        std::process::exit(1);
+    }
     std::fs::create_dir_all(format!("{}/{}", args.path, RUST_CRATES_ROOT))
         .expect("Failed to create directory");
 

@@ -1,11 +1,11 @@
-use std::{
-    path::PathBuf,
-    process::{Command, Stdio},
-};
+use std::path::PathBuf;
 
 use clap::Parser;
 
-use crate::utils::get_buck2_root;
+use crate::{
+    buck2::Buck2Command,
+    utils::{ensure_buck2_installed, get_buck2_root},
+};
 
 #[derive(Parser, Debug)]
 pub struct BuildArgs {
@@ -15,6 +15,12 @@ pub struct BuildArgs {
 }
 
 pub fn execute(args: &BuildArgs) {
+    // Ensure Buck2 is installed before proceeding
+    if let Err(e) = ensure_buck2_installed() {
+        eprintln!("Error: {}", e);
+        std::process::exit(1);
+    }
+
     // Get the root directory of the Buck2 project
     let buck2_root = get_buck2_root();
     if buck2_root.is_empty() {
@@ -34,25 +40,25 @@ pub fn execute(args: &BuildArgs) {
         relative_path += "/";
     }
 
-    let mut buck2_build_cmd = Command::new("buck2");
-    buck2_build_cmd
-        .arg("build")
-        .arg(format!("//{relative_path}..."))
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit());
+    if args.verbose > 2 {
+        eprintln!("error: Maximum verbosity!");
+        return;
+    }
 
-    match args.verbose {
-        0 => {}
-        1 => {
-            buck2_build_cmd.arg("-v=3");
+    let target = format!("//{relative_path}...");
+    let result = Buck2Command::build(&target)
+        .verbosity(args.verbose)
+        .status();
+
+    match result {
+        Ok(status) if status.success() => {}
+        Ok(_) => {
+            eprintln!("Buck2 build failed");
+            std::process::exit(1);
         }
-        2 => {
-            buck2_build_cmd.arg("-v=4");
-        }
-        _ => {
-            eprintln!("error: Maximum verbosity!");
-            return;
+        Err(e) => {
+            eprintln!("Failed to execute buck2 build: {}", e);
+            std::process::exit(1);
         }
     }
-    let _status = buck2_build_cmd.status().expect("Failed to execute command");
 }
