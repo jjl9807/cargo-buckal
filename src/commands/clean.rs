@@ -1,8 +1,6 @@
-use std::process::{Command, Stdio};
-
 use clap::Parser;
 
-use crate::utils::ensure_buck2_installed;
+use crate::{buck2::Buck2Command, utils::ensure_buck2_installed};
 
 #[derive(Parser, Debug)]
 pub struct CleanArgs {}
@@ -14,10 +12,8 @@ pub fn execute(_args: &CleanArgs) {
         std::process::exit(1);
     }
 
-    let _status = Command::new("buck2")
-        .arg("clean")
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .status()
-        .expect("Failed to execute command");
+    if let Err(e) = Buck2Command::clean().execute() {
+        eprintln!("Failed to execute buck2 clean: {}", e);
+        std::process::exit(1);
+    }
 }

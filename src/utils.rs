@@ -3,8 +3,10 @@ use std::{io, process::Command, str::FromStr};
 use cargo_platform::Cfg;
 use colored::Colorize;
 
+use crate::buck2::Buck2Command;
+
 pub fn check_buck2_installed() -> bool {
-    Command::new("buck2")
+    Buck2Command::new()
         .arg("--help")
         .output()
         .map(|output| output.status.success())
@@ -58,16 +60,18 @@ pub fn ensure_buck2_installed() -> io::Result<()> {
 
 pub fn get_buck2_root() -> String {
     // This function should return the root directory of the Buck2 project.
-    let output = Command::new("buck2")
-        .arg("root")
-        .output()
-        .expect("Failed to execute buck2 command");
-
-    if output.status.success() {
-        String::from_utf8_lossy(&output.stdout).trim().to_string()
-    } else {
-        eprintln!("{}", String::from_utf8_lossy(&output.stderr));
-        String::new()
+    match Buck2Command::root().output() {
+        Ok(output) if output.status.success() => {
+            String::from_utf8_lossy(&output.stdout).trim().to_string()
+        }
+        Ok(output) => {
+            eprintln!("{}", String::from_utf8_lossy(&output.stderr));
+            String::new()
+        }
+        Err(e) => {
+            eprintln!("Failed to execute buck2 command: {}", e);
+            String::new()
+        }
     }
 }
 

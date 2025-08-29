@@ -1,4 +1,5 @@
 mod buck;
+mod buck2;
 mod buckify;
 mod cli;
 mod commands;
