@@ -24,32 +24,38 @@ impl Config {
     /// Load configuration from ~/.config/buckal/config.toml
     pub fn load() -> Self {
         let config_path = Self::config_path();
-        
+
         if !config_path.exists() {
             return Self::default();
         }
-        
+
         match fs::read_to_string(&config_path) {
-            Ok(content) => {
-                match toml::from_str::<Config>(&content) {
-                    Ok(config) => config,
-                    Err(_) => {
-                        eprintln!("Warning: Failed to parse config file at {}, using defaults", config_path.display());
-                        Self::default()
-                    }
+            Ok(content) => match toml::from_str::<Config>(&content) {
+                Ok(config) => config,
+                Err(_) => {
+                    eprintln!(
+                        "Warning: Failed to parse config file at {}, using defaults",
+                        config_path.display()
+                    );
+                    Self::default()
                 }
-            }
+            },
             Err(_) => {
-                eprintln!("Warning: Failed to read config file at {}, using defaults", config_path.display());
+                eprintln!(
+                    "Warning: Failed to read config file at {}, using defaults",
+                    config_path.display()
+                );
                 Self::default()
             }
         }
     }
-    
+
     /// Get the configuration file path
     pub fn config_path() -> PathBuf {
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-        PathBuf::from(home).join(".config").join("buckal").join("config.toml")
+        PathBuf::from(home)
+            .join(".config")
+            .join("buckal")
+            .join("config.toml")
     }
-    
 }
