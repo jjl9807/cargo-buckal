@@ -71,6 +71,12 @@ pub fn execute(args: &MigrateArgs) {
 
     while let Some(node) = queue.pop_front() {
         let package = packages_map.get(&node.id).unwrap().to_owned();
+        
+        // Skip first-party dependencies
+        if package.source.is_none() {
+            continue;
+        }
+        
         println!("Processing package: {}", package.name);
 
         // Vendor package sources

@@ -50,6 +50,10 @@ pub fn buckify_dep_node(
         .iter()
         .find(|t| {
             t.kind.contains(&cargo_metadata::TargetKind::Lib)
+                || t.kind.contains(&cargo_metadata::TargetKind::CDyLib)
+                || t.kind.contains(&cargo_metadata::TargetKind::DyLib)
+                || t.kind.contains(&cargo_metadata::TargetKind::RLib)
+                || t.kind.contains(&cargo_metadata::TargetKind::StaticLib)
                 || t.kind.contains(&cargo_metadata::TargetKind::ProcMacro)
         })
         .expect("No library target found");
