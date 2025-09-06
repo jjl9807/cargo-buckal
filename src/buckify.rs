@@ -8,13 +8,12 @@ use fs_extra::dir::{CopyOptions, copy};
 use itertools::Itertools;
 
 use crate::{
-    buck::{BuildscriptRun, CargoRustBinary, CargoRustLibrary, Glob, Load, Rule}, utils::{get_buck2_root, get_cfgs, get_target}, RUST_CRATES_ROOT
+    RUST_CRATES_ROOT,
+    buck::{BuildscriptRun, CargoRustBinary, CargoRustLibrary, Glob, Load, Rule},
+    utils::{get_buck2_root, get_cfgs, get_target},
 };
 
-pub fn buckify_dep_node(
-    node: &Node,
-    packages_map: &HashMap<PackageId, Package>,
-) -> Vec<Rule> {
+pub fn buckify_dep_node(node: &Node, packages_map: &HashMap<PackageId, Package>) -> Vec<Rule> {
     let package = packages_map.get(&node.id).unwrap().to_owned();
     let buckal_name = format!("{}-{}", package.name, package.version);
 
@@ -156,10 +155,7 @@ pub fn buckify_dep_node(
     buck_rules
 }
 
-pub fn buckify_root_node(
-    node: &Node,
-    packages_map: &HashMap<PackageId, Package>,
-) -> Vec<Rule> {
+pub fn buckify_root_node(node: &Node, packages_map: &HashMap<PackageId, Package>) -> Vec<Rule> {
     let package = packages_map.get(&node.id).unwrap().to_owned();
     let buckal_name = package.name.to_string();
 
