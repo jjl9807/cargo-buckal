@@ -17,3 +17,5 @@ serde_starlark = "0.1.17"
 colored = "2.0"
 inquire = "0.7.5"
 toml = "0.8"
+pyo3 = { version = "0.26.0", features = ["auto-initialize"] }
+pyo3-ffi = "0.26.0"
