@@ -11,9 +11,6 @@ use crate::{
 
 #[derive(Parser, Debug)]
 pub struct MigrateArgs {
-    /// generate minimal BUCK rules
-    #[arg(long, default_value = "false")]
-    pub minimal: bool,
     /// override existing source files
     #[arg(long, default_value = "false")]
     #[clap(name = "override")]
@@ -52,7 +49,7 @@ pub fn execute(args: &MigrateArgs) {
     let buck_path = Utf8PathBuf::from(cwd.to_str().unwrap()).join("BUCK");
 
     // Generate BUCK rules
-    let buck_rules = buckify_root_node(root_node, &packages_map, args.minimal);
+    let buck_rules = buckify_root_node(root_node, &packages_map);
 
     // Generate the BUCK file
     let buck_content = gen_buck_content(&buck_rules);
@@ -88,7 +85,7 @@ pub fn execute(args: &MigrateArgs) {
         let vendor_path = vendor_package(&package, args._override);
 
         // Generate BUCK rules
-        let mut buck_rules = buckify_dep_node(&node, &packages_map, args.minimal);
+        let mut buck_rules = buckify_dep_node(&node, &packages_map);
 
         // Patch BUCK Rules
         let buck_path = vendor_path.join("BUCK");

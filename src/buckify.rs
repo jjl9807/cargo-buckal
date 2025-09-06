@@ -8,15 +8,12 @@ use fs_extra::dir::{CopyOptions, copy};
 use itertools::Itertools;
 
 use crate::{
-    RUST_CRATES_ROOT,
-    buck::{BuildscriptRun, CargoRustBinary, CargoRustLibrary, Load, Rule},
-    utils::{get_buck2_root, get_cfgs, get_target},
+    buck::{BuildscriptRun, CargoRustBinary, CargoRustLibrary, Glob, Load, Rule}, utils::{get_buck2_root, get_cfgs, get_target}, RUST_CRATES_ROOT
 };
 
 pub fn buckify_dep_node(
     node: &Node,
     packages_map: &HashMap<PackageId, Package>,
-    is_minimal: bool,
 ) -> Vec<Rule> {
     let package = packages_map.get(&node.id).unwrap().to_owned();
     let buckal_name = format!("{}-{}", package.name, package.version);
@@ -26,22 +23,17 @@ pub fn buckify_dep_node(
 
     let mut rust_library = CargoRustLibrary {
         name: buckal_name.clone(),
+        srcs: Glob {
+            include: Set::from(["**/**".to_owned()]),
+            exclude: Set::from(["BUCK".to_owned()]),
+        },
         crate_name: package.name.to_string(),
         edition: package.edition.to_string(),
+        env: gen_cargo_env(&package),
         features: Set::from_iter(node.features.iter().map(|f| f.to_string())),
         visibility: Set::from(["PUBLIC".to_owned()]),
         ..Default::default()
     };
-
-    if is_minimal {
-        // If minimal, only include nessary fields
-        rust_library.srcs.include = Set::from(["**/*.rs".to_owned()]);
-    } else {
-        // Include all possible fields
-        rust_library.srcs.include = Set::from(["**/**".to_owned()]);
-        rust_library.srcs.exclude = Set::from(["BUCK".to_owned()]);
-        rust_library.env = gen_cargo_env(&package);
-    }
 
     // Set the crate root path
     let manifest_dir = package.manifest_path.parent().unwrap().to_owned();
@@ -108,22 +100,16 @@ pub fn buckify_dep_node(
         // create the build script rule
         let mut buildscript_build = CargoRustBinary {
             name: format!("{}-{}", buckal_name, build_target.name),
+            srcs: Glob {
+                include: Set::from(["**/**".to_owned()]),
+                exclude: Set::from(["BUCK".to_owned()]),
+            },
             crate_name: build_target.name.to_owned(),
             edition: package.edition.to_string(),
+            env: gen_cargo_env(&package),
             features: Set::from_iter(node.features.iter().map(|f| f.to_string())),
             ..Default::default()
         };
-
-        if is_minimal {
-            // If minimal, only include nessary fields
-            buildscript_build.srcs.include =
-                Set::from(["**/*.rs".to_owned(), "build.rs".to_owned()]);
-        } else {
-            // Include all possible fields
-            buildscript_build.srcs.include = Set::from(["**/**".to_owned()]);
-            buildscript_build.srcs.exclude = Set::from(["BUCK".to_owned()]);
-            buildscript_build.env = gen_cargo_env(&package);
-        }
 
         // Set the crate root path for the build script
         buildscript_build.crate_root = build_target
@@ -173,7 +159,6 @@ pub fn buckify_dep_node(
 pub fn buckify_root_node(
     node: &Node,
     packages_map: &HashMap<PackageId, Package>,
-    is_minimal: bool,
 ) -> Vec<Rule> {
     let package = packages_map.get(&node.id).unwrap().to_owned();
     let buckal_name = package.name.to_string();
@@ -183,22 +168,17 @@ pub fn buckify_root_node(
 
     let mut rust_binary = CargoRustBinary {
         name: buckal_name.clone(),
+        srcs: Glob {
+            include: Set::from(["**/**".to_owned()]),
+            exclude: Set::from(["BUCK".to_owned()]),
+        },
         crate_name: package.name.to_string(),
         edition: package.edition.to_string(),
+        env: gen_cargo_env(&package),
         features: Set::from_iter(node.features.iter().map(|f| f.to_string())),
         visibility: Set::from(["PUBLIC".to_owned()]),
         ..Default::default()
     };
-
-    if is_minimal {
-        // If minimal, only include nessary fields
-        rust_binary.srcs.include = Set::from(["**/*.rs".to_owned()]);
-    } else {
-        // Include all possible fields
-        rust_binary.srcs.include = Set::from(["**/**".to_owned()]);
-        rust_binary.srcs.exclude = Set::from(["BUCK".to_owned()]);
-        rust_binary.env = gen_cargo_env(&package);
-    }
 
     // Set the crate root path
     let cwd = std::env::current_dir().expect("Failed to get current directory");
@@ -253,22 +233,16 @@ pub fn buckify_root_node(
         // create the build script rule
         let mut buildscript_build = CargoRustBinary {
             name: format!("{}-{}", buckal_name, build_target.name),
+            srcs: Glob {
+                include: Set::from(["**/**".to_owned()]),
+                exclude: Set::from(["BUCK".to_owned()]),
+            },
             crate_name: build_target.name.to_owned(),
             edition: package.edition.to_string(),
+            env: gen_cargo_env(&package),
             features: Set::from_iter(node.features.iter().map(|f| f.to_string())),
             ..Default::default()
         };
-
-        if is_minimal {
-            // If minimal, only include nessary fields
-            buildscript_build.srcs.include =
-                Set::from(["**/*.rs".to_owned(), "build.rs".to_owned()]);
-        } else {
-            // Include all possible fields
-            buildscript_build.srcs.include = Set::from(["**/**".to_owned()]);
-            buildscript_build.srcs.exclude = Set::from(["BUCK".to_owned()]);
-            buildscript_build.env = gen_cargo_env(&package);
-        }
 
         // Set the crate root path for the build script
         buildscript_build.crate_root = build_target
