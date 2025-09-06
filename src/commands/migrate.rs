@@ -4,9 +4,11 @@ use cargo_metadata::{MetadataCommand, Node, camino::Utf8PathBuf};
 use clap::Parser;
 
 use crate::{
-    buck::{parse_buck_file, patch_buck_rules}, buckify::{
+    buck::{parse_buck_file, patch_buck_rules},
+    buckify::{
         buckify_dep_node, buckify_root_node, check_dep_target, gen_buck_content, vendor_package,
-    }, utils::{check_buck2_package, ensure_buck2_installed}
+    },
+    utils::{check_buck2_package, ensure_buck2_installed},
 };
 
 #[derive(Parser, Debug)]
@@ -67,10 +69,10 @@ pub fn execute(args: &MigrateArgs) {
 
     while let Some(node) = queue.pop_front() {
         let package = packages_map.get(&node.id).unwrap().to_owned();
-        
+
         // Skip already visited nodes
         if visited.contains(node.id.repr.as_str()) {
-            continue; 
+            continue;
         }
         visited.insert(node.id.repr.to_owned());
 
@@ -90,7 +92,8 @@ pub fn execute(args: &MigrateArgs) {
         // Patch BUCK Rules
         let buck_path = vendor_path.join("BUCK");
         if buck_path.exists() && !args._override {
-            let existing_rules = parse_buck_file(&buck_path).expect("Failed to parse existing BUCK file");
+            let existing_rules =
+                parse_buck_file(&buck_path).expect("Failed to parse existing BUCK file");
             patch_buck_rules(&existing_rules, &mut buck_rules);
         } else {
             std::fs::File::create(&buck_path).expect("Failed to create BUCK file");

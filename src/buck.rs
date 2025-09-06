@@ -80,7 +80,7 @@ pub struct BuildscriptRun {
     pub local_manifest_dir: String,
 }
 
-#[derive(Debug)]
+#[derive(Default, Debug)]
 pub struct Glob {
     pub include: Set<String>,
     pub exclude: Set<String>,
@@ -112,15 +112,6 @@ impl Serialize for Glob {
             s.serialize_field("include", &self.include)?;
             s.serialize_field("exclude", &self.exclude)?;
             s.end()
-        }
-    }
-}
-
-impl Default for Glob {
-    fn default() -> Self {
-        Self {
-            include: Set::new(),
-            exclude: Set::new(),
         }
     }
 }
@@ -518,7 +509,7 @@ def load(*args, **kwargs):
     })
 }
 
-pub fn patch_buck_rules(existing: &Map<String, Rule>, to_patch: &mut Vec<Rule>) {
+pub fn patch_buck_rules(existing: &Map<String, Rule>, to_patch: &mut [Rule]) {
     for rule in to_patch.iter_mut() {
         match rule {
             Rule::CargoRustLibrary(new_rule) => {
@@ -536,9 +527,7 @@ pub fn patch_buck_rules(existing: &Map<String, Rule>, to_patch: &mut Vec<Rule>) 
                 }
             }
             Rule::BuildscriptRun(new_rule) => {
-                if let Some(Rule::BuildscriptRun(existing_rule)) =
-                    existing.get("buildscript_run")
-                {
+                if let Some(Rule::BuildscriptRun(existing_rule)) = existing.get("buildscript_run") {
                     new_rule.patch_from(existing_rule);
                 }
             }
