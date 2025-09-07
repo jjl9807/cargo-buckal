@@ -14,8 +14,6 @@ use crate::{
 #[derive(Parser, Debug)]
 pub struct AddArgs {
     pub package: String,
-    #[arg(long, default_value = "false")]
-    pub minimal: bool,
 }
 
 pub fn execute(args: &AddArgs) {
@@ -62,7 +60,7 @@ pub fn execute(args: &AddArgs) {
             let buck_path = Utf8PathBuf::from(cwd.to_str().unwrap()).join("BUCK");
 
             // Generate BUCK rules
-            let buck_rules = buckify_root_node(&node, &packages_map, args.minimal);
+            let buck_rules = buckify_root_node(&node, &packages_map);
 
             // Generate the BUCK file
             let buck_content = gen_buck_content(&buck_rules);
@@ -77,7 +75,7 @@ pub fn execute(args: &AddArgs) {
             std::fs::File::create(&buck_path).expect("Failed to create BUCK file");
 
             // Generate BUCK rules
-            let buck_rules = buckify_dep_node(&node, &packages_map, args.minimal);
+            let buck_rules = buckify_dep_node(&node, &packages_map);
 
             // Generate the BUCK file
             let buck_content = gen_buck_content(&buck_rules);
