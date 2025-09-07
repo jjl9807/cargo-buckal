@@ -81,6 +81,11 @@ impl Buck2Command {
     pub fn root() -> Self {
         Self::new().subcommand("root")
     }
+
+    /// Crate a targets command
+    pub fn targets() -> Self {
+        Self::new().subcommand("targets")
+    }
 }
 
 impl Default for Buck2Command {

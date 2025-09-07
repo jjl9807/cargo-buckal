@@ -16,6 +16,12 @@ pub enum Rule {
     BuildscriptRun(BuildscriptRun),
 }
 
+pub trait CargoRule {
+    fn deps_mut(&mut self) -> &mut Set<String>;
+    fn rustc_flags_mut(&mut self) -> &mut Set<String>;
+    fn env_mut(&mut self) -> &mut Map<String, String>;
+}
+
 #[derive(Debug)]
 pub struct Load {
     pub bzl: String,
@@ -140,6 +146,34 @@ impl Glob {
         // Patch exclude set
         let to_add: Vec<_> = other.exclude.difference(&self.exclude).cloned().collect();
         self.exclude.extend(to_add);
+    }
+}
+
+impl CargoRule for CargoRustLibrary {
+    fn deps_mut(&mut self) -> &mut Set<String> {
+        &mut self.deps
+    }
+
+    fn rustc_flags_mut(&mut self) -> &mut Set<String> {
+        &mut self.rustc_flags
+    }
+
+    fn env_mut(&mut self) -> &mut Map<String, String> {
+        &mut self.env
+    }
+}
+
+impl CargoRule for CargoRustBinary {
+    fn deps_mut(&mut self) -> &mut Set<String> {
+        &mut self.deps
+    }
+
+    fn rustc_flags_mut(&mut self) -> &mut Set<String> {
+        &mut self.rustc_flags
+    }
+
+    fn env_mut(&mut self) -> &mut Map<String, String> {
+        &mut self.env
     }
 }
 
