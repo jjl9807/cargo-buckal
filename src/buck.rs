@@ -16,6 +16,16 @@ pub enum Rule {
     BuildscriptRun(BuildscriptRun),
 }
 
+impl Rule {
+    pub fn as_cargo_rule_mut(&mut self) -> Option<&mut dyn CargoRule> {
+        match self {
+            Rule::CargoRustLibrary(inner) => Some(inner),
+            Rule::CargoRustBinary(inner) => Some(inner),
+            _ => None,
+        }
+    }
+}
+
 pub trait CargoRule {
     fn deps_mut(&mut self) -> &mut Set<String>;
     fn rustc_flags_mut(&mut self) -> &mut Set<String>;

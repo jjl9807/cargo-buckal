@@ -39,7 +39,7 @@ pub fn buckify_dep_node(node: &Node, packages_map: &HashMap<PackageId, Package>)
         })
         .expect("No library target found");
 
-    let mut rust_library = emit_rust_library(
+    let rust_library = emit_rust_library(
         &package,
         node,
         packages_map,
@@ -47,6 +47,8 @@ pub fn buckify_dep_node(node: &Node, packages_map: &HashMap<PackageId, Package>)
         &manifest_dir,
         &buckal_name,
     );
+
+    buck_rules.push(Rule::CargoRustLibrary(rust_library));
 
     // Check if the package has a build script
     let custom_build_target = package
@@ -57,7 +59,7 @@ pub fn buckify_dep_node(node: &Node, packages_map: &HashMap<PackageId, Package>)
     if let Some(build_target) = custom_build_target {
         // create the build script rule
         let buildscript_build = emit_buildscript_build(
-            &mut rust_library,
+            buck_rules.last_mut().unwrap().as_cargo_rule_mut().unwrap(),
             build_target,
             &package,
             node,
@@ -71,7 +73,6 @@ pub fn buckify_dep_node(node: &Node, packages_map: &HashMap<PackageId, Package>)
         let buildscript_run = emit_buildscript_run(&package, node, &buckal_name, build_target);
         buck_rules.push(Rule::BuildscriptRun(buildscript_run));
     }
-    buck_rules.push(Rule::CargoRustLibrary(rust_library));
 
     buck_rules
 }
@@ -107,7 +108,7 @@ pub fn buckify_root_node(node: &Node, packages_map: &HashMap<PackageId, Package>
     for bin_target in &bin_targets {
         let buckal_name = bin_target.name.to_owned();
 
-        let mut rust_binary = emit_rust_binary(
+        let rust_binary = emit_rust_binary(
             &package,
             node,
             packages_map,
@@ -115,6 +116,8 @@ pub fn buckify_root_node(node: &Node, packages_map: &HashMap<PackageId, Package>
             &manifest_dir,
             &buckal_name,
         );
+
+        buck_rules.push(Rule::CargoRustBinary(rust_binary));
 
         // Check if the package has a build script
         let custom_build_target = package
@@ -125,7 +128,7 @@ pub fn buckify_root_node(node: &Node, packages_map: &HashMap<PackageId, Package>
         if let Some(build_target) = custom_build_target {
             // create the build script rule
             let buildscript_build = emit_buildscript_build(
-                &mut rust_binary,
+                buck_rules.last_mut().unwrap().as_cargo_rule_mut().unwrap(),
                 build_target,
                 &package,
                 node,
@@ -139,7 +142,6 @@ pub fn buckify_root_node(node: &Node, packages_map: &HashMap<PackageId, Package>
             let buildscript_run = emit_buildscript_run(&package, node, &buckal_name, build_target);
             buck_rules.push(Rule::BuildscriptRun(buildscript_run));
         }
-        buck_rules.push(Rule::CargoRustBinary(rust_binary));
     }
 
     // emit buck rules for lib targets
@@ -150,7 +152,7 @@ pub fn buckify_root_node(node: &Node, packages_map: &HashMap<PackageId, Package>
             lib_target.name.to_owned()
         };
 
-        let mut rust_library = emit_rust_library(
+        let rust_library = emit_rust_library(
             &package,
             node,
             packages_map,
@@ -158,6 +160,8 @@ pub fn buckify_root_node(node: &Node, packages_map: &HashMap<PackageId, Package>
             &manifest_dir,
             &buckal_name,
         );
+
+        buck_rules.push(Rule::CargoRustLibrary(rust_library));
 
         // Check if the package has a build script
         let custom_build_target = package
@@ -168,7 +172,7 @@ pub fn buckify_root_node(node: &Node, packages_map: &HashMap<PackageId, Package>
         if let Some(build_target) = custom_build_target {
             // create the build script build rule
             let buildscript_build = emit_buildscript_build(
-                &mut rust_library,
+                buck_rules.last_mut().unwrap().as_cargo_rule_mut().unwrap(),
                 build_target,
                 &package,
                 node,
@@ -182,7 +186,6 @@ pub fn buckify_root_node(node: &Node, packages_map: &HashMap<PackageId, Package>
             let buildscript_run = emit_buildscript_run(&package, node, &buckal_name, build_target);
             buck_rules.push(Rule::BuildscriptRun(buildscript_run));
         }
-        buck_rules.push(Rule::CargoRustLibrary(rust_library));
     }
 
     buck_rules
@@ -305,7 +308,7 @@ fn set_deps(
                     || is_build_script && dk.kind == DependencyKind::Build)
                     && check_dep_target(dk)
             }) {
-                // Normal dependencies on current arch
+                // Normal dependencies and build dependencies for `build.rs` on current arch
                 if dep_package.source.is_none() {
                     // first-party dependency
                     let buck2_root = get_buck2_root();
