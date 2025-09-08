@@ -531,7 +531,7 @@ fn emit_buildscript_run(
 ) -> BuildscriptRun {
     // create the build script run rule
     BuildscriptRun {
-        name: format!("{buckal_name}-build-script-run"),
+        name: format!("{buckal_name}-{}-run", build_target.name),
         package_name: package.name.to_string(),
         buildscript_rule: format!(":{}-{}", buckal_name, build_target.name),
         features: Set::from_iter(node.features.iter().map(|f| f.to_string())),
