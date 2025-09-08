@@ -303,6 +303,7 @@ fn set_deps(
     for dep in &node.deps {
         if let Some(dep_package) = packages_map.get(&dep.pkg) {
             let dep_name = format!("{}-{}", dep_package.name, dep_package.version);
+            let dep_package_name = dep_package.name.to_string();
             if dep.dep_kinds.iter().any(|dk| {
                 (dk.kind == DependencyKind::Normal
                     || is_build_script && dk.kind == DependencyKind::Build)
@@ -354,9 +355,18 @@ fn set_deps(
                                 .get("name")
                                 .and_then(|n| n.as_str())
                                 .expect("Failed to get target name");
-                            rust_rule
-                                .deps_mut()
-                                .insert(format!("{buck_package}:{buck_name}"));
+
+                            if dep.name != dep_package_name {
+                                // renamed dependency
+                                rust_rule.named_deps_mut().insert(
+                                    dep.name.clone(),
+                                    format!("{buck_package}:{buck_name}"),
+                                );
+                            } else {
+                                rust_rule
+                                    .deps_mut()
+                                    .insert(format!("{buck_package}:{buck_name}"));
+                            }
                         }
                         Ok(output) => {
                             panic!("{}", String::from_utf8_lossy(&output.stderr));
@@ -367,9 +377,17 @@ fn set_deps(
                     }
                 } else {
                     // third-party dependency
-                    rust_rule
-                        .deps_mut()
-                        .insert(format!("//{RUST_CRATES_ROOT}/{dep_name}:{dep_name}"));
+                    if dep.name != dep_package_name {
+                        // renamed dependency
+                        rust_rule.named_deps_mut().insert(
+                            dep.name.clone(),
+                            format!("//{RUST_CRATES_ROOT}/{dep_name}:{dep_name}"),
+                        );
+                    } else {
+                        rust_rule
+                            .deps_mut()
+                            .insert(format!("//{RUST_CRATES_ROOT}/{dep_name}:{dep_name}"));
+                    }
                 }
             }
         }
