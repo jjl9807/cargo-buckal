@@ -488,11 +488,11 @@ fn emit_buildscript_build(
     // process the build script in rust_library
     rust_rule.env_mut().insert(
         "OUT_DIR".to_owned(),
-        format!("$(location :{buckal_name}-build-script-run[out_dir])").to_owned(),
+        format!("$(location :{buckal_name}-{}-run[out_dir])", build_target.name).to_owned(),
     );
     rust_rule
         .rustc_flags_mut()
-        .insert(format!("@$(location :{buckal_name}-build-script-run[rustc_flags])").to_owned());
+        .insert(format!("@$(location :{buckal_name}-{}-run[rustc_flags])", build_target.name).to_owned());
 
     // create the build script rule
     let mut buildscript_build = CargoRustBinary {
