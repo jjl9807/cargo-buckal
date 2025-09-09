@@ -97,6 +97,8 @@ pub struct BuildscriptRun {
     pub features: Set<String>,
     pub version: String,
     pub local_manifest_dir: String,
+    #[serde(skip_serializing_if = "Set::is_empty")]
+    pub visibility: Set<String>,
 }
 
 #[derive(Default, Debug)]
@@ -305,7 +307,9 @@ impl CargoRustLibrary {
         self.rustc_flags.extend(to_add);
         // Patch named_deps map
         for (k, v) in &other.named_deps {
-            self.named_deps.entry(k.clone()).or_insert_with(|| v.clone());
+            self.named_deps
+                .entry(k.clone())
+                .or_insert_with(|| v.clone());
         }
         // Patch visibility set
         let to_add: Vec<_> = other
@@ -421,7 +425,9 @@ impl CargoRustBinary {
         self.rustc_flags.extend(to_add);
         // Patch named_deps map
         for (k, v) in &other.named_deps {
-            self.named_deps.entry(k.clone()).or_insert_with(|| v.clone());
+            self.named_deps
+                .entry(k.clone())
+                .or_insert_with(|| v.clone());
         }
         // Patch visibility set
         let to_add: Vec<_> = other
@@ -474,6 +480,12 @@ impl BuildscriptRun {
             .expect("Expected 'local_manifest_dir' argument")
             .and_then(|v| v.extract().ok())
             .unwrap_or_default();
+        let visibility_vec: Vec<String> = kwargs
+            .get_item("visibility")
+            .expect("Expected 'visibility' argument")
+            .and_then(|v| v.extract().ok())
+            .unwrap_or_default();
+        let visibility: Set<String> = visibility_vec.into_iter().collect();
         Ok(BuildscriptRun {
             name,
             package_name,
@@ -482,6 +494,7 @@ impl BuildscriptRun {
             features,
             version,
             local_manifest_dir,
+            visibility,
         })
     }
 
@@ -493,6 +506,13 @@ impl BuildscriptRun {
         // Patch features set
         let to_add: Vec<_> = other.features.difference(&self.features).cloned().collect();
         self.features.extend(to_add);
+        // Patch visibility set
+        let to_add: Vec<_> = other
+            .visibility
+            .difference(&self.visibility)
+            .cloned()
+            .collect();
+        self.visibility.extend(to_add);
     }
 }
 
