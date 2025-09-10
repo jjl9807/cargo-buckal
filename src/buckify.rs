@@ -305,7 +305,7 @@ fn set_deps(
             let dep_name = format!("{}-{}", dep_package.name, dep_package.version);
             let dep_package_name = dep_package.name.to_string();
             if dep.dep_kinds.iter().any(|dk| {
-                (dk.kind == DependencyKind::Normal
+                (!is_build_script && dk.kind == DependencyKind::Normal
                     || is_build_script && dk.kind == DependencyKind::Build)
                     && check_dep_target(dk)
             }) {
@@ -488,11 +488,19 @@ fn emit_buildscript_build(
     // process the build script in rust_library
     rust_rule.env_mut().insert(
         "OUT_DIR".to_owned(),
-        format!("$(location :{buckal_name}-{}-run[out_dir])", build_target.name).to_owned(),
+        format!(
+            "$(location :{buckal_name}-{}-run[out_dir])",
+            build_target.name
+        )
+        .to_owned(),
     );
-    rust_rule
-        .rustc_flags_mut()
-        .insert(format!("@$(location :{buckal_name}-{}-run[rustc_flags])", build_target.name).to_owned());
+    rust_rule.rustc_flags_mut().insert(
+        format!(
+            "@$(location :{buckal_name}-{}-run[rustc_flags])",
+            build_target.name
+        )
+        .to_owned(),
+    );
 
     // create the build script rule
     let mut buildscript_build = CargoRustBinary {
