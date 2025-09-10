@@ -305,12 +305,6 @@ impl CargoRustLibrary {
             .cloned()
             .collect();
         self.rustc_flags.extend(to_add);
-        // Patch named_deps map
-        for (k, v) in &other.named_deps {
-            self.named_deps
-                .entry(k.clone())
-                .or_insert_with(|| v.clone());
-        }
         // Patch visibility set
         let to_add: Vec<_> = other
             .visibility
@@ -420,12 +414,6 @@ impl CargoRustBinary {
             .cloned()
             .collect();
         self.rustc_flags.extend(to_add);
-        // Patch named_deps map
-        for (k, v) in &other.named_deps {
-            self.named_deps
-                .entry(k.clone())
-                .or_insert_with(|| v.clone());
-        }
         // Patch visibility set
         let to_add: Vec<_> = other
             .visibility
