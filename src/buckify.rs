@@ -343,7 +343,7 @@ fn set_deps(
                                 .find(|t| {
                                     t.get("buck.type")
                                         .and_then(|k| k.as_str())
-                                        .map_or(false, |k| k.ends_with("rust_library"))
+                                        .is_some_and(|k| k.ends_with("rust_library"))
                                 })
                                 .expect("Failed to find rust library rule in BUCK file");
                             let buck_package = target_item
@@ -402,17 +402,17 @@ fn emit_rust_library(
     packages_map: &HashMap<PackageId, Package>,
     lib_target: &Target,
     manifest_dir: &Utf8PathBuf,
-    buckal_name: &String,
+    buckal_name: &str,
 ) -> CargoRustLibrary {
     let mut rust_library = CargoRustLibrary {
-        name: buckal_name.clone(),
+        name: buckal_name.to_owned(),
         srcs: Glob {
             include: Set::from(["**/**".to_owned()]),
             exclude: Set::from(["BUCK".to_owned()]),
         },
         crate_name: package.name.to_string(),
         edition: package.edition.to_string(),
-        env: gen_cargo_env(&package),
+        env: gen_cargo_env(package),
         features: Set::from_iter(node.features.iter().map(|f| f.to_string())),
         visibility: Set::from(["PUBLIC".to_owned()]),
         ..Default::default()
@@ -429,7 +429,7 @@ fn emit_rust_library(
     rust_library.crate_root = lib_target
         .src_path
         .to_owned()
-        .strip_prefix(&manifest_dir)
+        .strip_prefix(manifest_dir)
         .expect("Failed to get library source path")
         .to_string();
 
@@ -446,17 +446,17 @@ fn emit_rust_binary(
     packages_map: &HashMap<PackageId, Package>,
     bin_target: &Target,
     manifest_dir: &Utf8PathBuf,
-    buckal_name: &String,
+    buckal_name: &str,
 ) -> CargoRustBinary {
     let mut rust_binary = CargoRustBinary {
-        name: buckal_name.clone(),
+        name: buckal_name.to_owned(),
         srcs: Glob {
             include: Set::from(["**/**".to_owned()]),
             exclude: Set::from(["BUCK".to_owned()]),
         },
         crate_name: package.name.to_string(),
         edition: package.edition.to_string(),
-        env: gen_cargo_env(&package),
+        env: gen_cargo_env(package),
         features: Set::from_iter(node.features.iter().map(|f| f.to_string())),
         visibility: Set::from(["PUBLIC".to_owned()]),
         ..Default::default()
@@ -466,7 +466,7 @@ fn emit_rust_binary(
     rust_binary.crate_root = bin_target
         .src_path
         .to_owned()
-        .strip_prefix(&manifest_dir)
+        .strip_prefix(manifest_dir)
         .expect("Failed to get binary source path")
         .to_string();
 
@@ -505,7 +505,7 @@ fn emit_buildscript_build(
         },
         crate_name: build_target.name.to_owned(),
         edition: package.edition.to_string(),
-        env: gen_cargo_env(&package),
+        env: gen_cargo_env(package),
         features: Set::from_iter(node.features.iter().map(|f| f.to_string())),
         ..Default::default()
     };
@@ -514,7 +514,7 @@ fn emit_buildscript_build(
     buildscript_build.crate_root = build_target
         .src_path
         .to_owned()
-        .strip_prefix(&manifest_dir)
+        .strip_prefix(manifest_dir)
         .expect("Failed to get library source path")
         .to_string();
 
@@ -544,9 +544,9 @@ fn emit_buildscript_run(
     }
 }
 
-fn get_build_name(s: &str) -> Cow<str> {
-    if s.ends_with("-build") {
-        Cow::Owned(s[..s.len() - 6].to_string())
+fn get_build_name(s: &str) -> Cow<'_, str> {
+    if let Some(stripped) = s.strip_suffix("-build") {
+        Cow::Owned(stripped.to_string())
     } else {
         Cow::Borrowed(s)
     }
