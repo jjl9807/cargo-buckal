@@ -81,7 +81,7 @@ pub fn execute(args: &MigrateArgs) {
             continue;
         }
 
-        println!("Processing package: {}", package.name);
+        println!("Processing package: {}@{}", package.name, package.version);
 
         // Vendor package sources
         let vendor_path = vendor_package(&package, args._override);

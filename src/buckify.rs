@@ -1,15 +1,21 @@
 use std::{
+    borrow::Cow,
     collections::{BTreeMap as Map, BTreeSet as Set, HashMap},
+    path::PathBuf,
     vec,
 };
 
-use cargo_metadata::{DepKindInfo, DependencyKind, Node, Package, PackageId, camino::Utf8PathBuf};
+use cargo_metadata::{
+    DepKindInfo, DependencyKind, Node, Package, PackageId, Target, camino::Utf8PathBuf,
+};
 use fs_extra::dir::{CopyOptions, copy};
 use itertools::Itertools;
+use serde_json::Value;
 
 use crate::{
     RUST_CRATES_ROOT,
-    buck::{BuildscriptRun, CargoRustBinary, CargoRustLibrary, Glob, Load, Rule},
+    buck::{BuildscriptRun, CargoRule, CargoRustBinary, CargoRustLibrary, Glob, Load, Rule},
+    buck2::Buck2Command,
     utils::{get_buck2_root, get_cfgs, get_target},
 };
 
@@ -20,21 +26,6 @@ pub fn buckify_dep_node(node: &Node, packages_map: &HashMap<PackageId, Package>)
     // emit buck rules for lib target
     let mut buck_rules: Vec<Rule> = Vec::new();
 
-    let mut rust_library = CargoRustLibrary {
-        name: buckal_name.clone(),
-        srcs: Glob {
-            include: Set::from(["**/**".to_owned()]),
-            exclude: Set::from(["BUCK".to_owned()]),
-        },
-        crate_name: package.name.to_string(),
-        edition: package.edition.to_string(),
-        env: gen_cargo_env(&package),
-        features: Set::from_iter(node.features.iter().map(|f| f.to_string())),
-        visibility: Set::from(["PUBLIC".to_owned()]),
-        ..Default::default()
-    };
-
-    // Set the crate root path
     let manifest_dir = package.manifest_path.parent().unwrap().to_owned();
     let lib_target = package
         .targets
@@ -48,36 +39,17 @@ pub fn buckify_dep_node(node: &Node, packages_map: &HashMap<PackageId, Package>)
                 || t.kind.contains(&cargo_metadata::TargetKind::ProcMacro)
         })
         .expect("No library target found");
-    if lib_target
-        .kind
-        .contains(&cargo_metadata::TargetKind::ProcMacro)
-    {
-        rust_library.proc_macro = Some(true);
-    }
-    rust_library.crate_root = lib_target
-        .src_path
-        .to_owned()
-        .strip_prefix(&manifest_dir)
-        .expect("Failed to get library source path")
-        .to_string();
 
-    // Set dependencies
-    let dep_prefix = format!("//{RUST_CRATES_ROOT}/");
-    for dep in &node.deps {
-        if let Some(dep_package) = packages_map.get(&dep.pkg) {
-            let dep_name = format!("{}-{}", dep_package.name, dep_package.version);
-            if dep
-                .dep_kinds
-                .iter()
-                .any(|dk| dk.kind == DependencyKind::Normal && check_dep_target(dk))
-            {
-                // Normal dependencies on current arch
-                rust_library
-                    .deps
-                    .insert(format!("{dep_prefix}{dep_name}:{dep_name}"));
-            }
-        }
-    }
+    let rust_library = emit_rust_library(
+        &package,
+        node,
+        packages_map,
+        lib_target,
+        &manifest_dir,
+        &buckal_name,
+    );
+
+    buck_rules.push(Rule::CargoRustLibrary(rust_library));
 
     // Check if the package has a build script
     let custom_build_target = package
@@ -86,70 +58,21 @@ pub fn buckify_dep_node(node: &Node, packages_map: &HashMap<PackageId, Package>)
         .find(|t| t.kind.contains(&cargo_metadata::TargetKind::CustomBuild));
 
     if let Some(build_target) = custom_build_target {
-        // process the build script in rust_library
-        rust_library.env.insert(
-            "OUT_DIR".to_owned(),
-            format!("$(location :{buckal_name}-build-script-run[out_dir])").to_owned(),
-        );
-        rust_library.rustc_flags.insert(
-            format!("@$(location :{buckal_name}-build-script-run[rustc_flags])").to_owned(),
-        );
-        buck_rules.push(Rule::CargoRustLibrary(rust_library));
-
         // create the build script rule
-        let mut buildscript_build = CargoRustBinary {
-            name: format!("{}-{}", buckal_name, build_target.name),
-            srcs: Glob {
-                include: Set::from(["**/**".to_owned()]),
-                exclude: Set::from(["BUCK".to_owned()]),
-            },
-            crate_name: build_target.name.to_owned(),
-            edition: package.edition.to_string(),
-            env: gen_cargo_env(&package),
-            features: Set::from_iter(node.features.iter().map(|f| f.to_string())),
-            ..Default::default()
-        };
-
-        // Set the crate root path for the build script
-        buildscript_build.crate_root = build_target
-            .src_path
-            .to_owned()
-            .strip_prefix(&manifest_dir)
-            .expect("Failed to get library source path")
-            .to_string();
-
-        // Set dependencies for the build script
-        for dep in &node.deps {
-            if let Some(dep_package) = packages_map.get(&dep.pkg) {
-                let dep_name = format!("{}-{}", dep_package.name, dep_package.version);
-                if dep
-                    .dep_kinds
-                    .iter()
-                    .any(|dk| dk.kind == DependencyKind::Build)
-                {
-                    // Build dependencies
-                    buildscript_build
-                        .deps
-                        .insert(format!("{dep_prefix}{dep_name}:{dep_name}"));
-                }
-            }
-        }
+        let buildscript_build = emit_buildscript_build(
+            buck_rules.last_mut().unwrap().as_cargo_rule_mut().unwrap(),
+            build_target,
+            &package,
+            node,
+            packages_map,
+            &buckal_name,
+            &manifest_dir,
+        );
         buck_rules.push(Rule::CargoRustBinary(buildscript_build));
 
         // create the build script run rule
-        let buildscript_run = BuildscriptRun {
-            name: format!("{buckal_name}-build-script-run"),
-            package_name: package.name.to_string(),
-            buildscript_rule: format!(":{}-{}", buckal_name, build_target.name),
-            features: Set::from_iter(node.features.iter().map(|f| f.to_string())),
-            version: package.version.to_string(),
-            local_manifest_dir: "**".to_owned(),
-            ..Default::default()
-        };
+        let buildscript_run = emit_buildscript_run(&package, node, &buckal_name, build_target);
         buck_rules.push(Rule::BuildscriptRun(buildscript_run));
-    } else {
-        // No build script, all rules done!
-        buck_rules.push(Rule::CargoRustLibrary(rust_library));
     }
 
     buck_rules
@@ -157,129 +80,113 @@ pub fn buckify_dep_node(node: &Node, packages_map: &HashMap<PackageId, Package>)
 
 pub fn buckify_root_node(node: &Node, packages_map: &HashMap<PackageId, Package>) -> Vec<Rule> {
     let package = packages_map.get(&node.id).unwrap().to_owned();
-    let buckal_name = package.name.to_string();
 
-    // emit buck rules for bin target
-    let mut buck_rules: Vec<Rule> = Vec::new();
-
-    let mut rust_binary = CargoRustBinary {
-        name: buckal_name.clone(),
-        srcs: Glob {
-            include: Set::from(["**/**".to_owned()]),
-            exclude: Set::from(["BUCK".to_owned()]),
-        },
-        crate_name: package.name.to_string(),
-        edition: package.edition.to_string(),
-        env: gen_cargo_env(&package),
-        features: Set::from_iter(node.features.iter().map(|f| f.to_string())),
-        visibility: Set::from(["PUBLIC".to_owned()]),
-        ..Default::default()
-    };
-
-    // Set the crate root path
-    let cwd = std::env::current_dir().expect("Failed to get current directory");
-    let manifest_dir = Utf8PathBuf::from(cwd.to_str().unwrap());
-    let bin_target = package
+    let bin_targets = package
         .targets
         .iter()
-        .find(|t| t.kind.contains(&cargo_metadata::TargetKind::Bin))
-        .expect("No binary target found");
-    rust_binary.crate_root = bin_target
-        .src_path
-        .to_owned()
-        .strip_prefix(&manifest_dir)
-        .expect("Failed to get binary source path")
-        .to_string();
+        .filter(|t| t.kind.contains(&cargo_metadata::TargetKind::Bin))
+        .collect::<Vec<_>>();
 
-    // Set dependencies
-    let dep_prefix = format!("//{RUST_CRATES_ROOT}/");
-    for dep in &node.deps {
-        if let Some(dep_package) = packages_map.get(&dep.pkg) {
-            let dep_name = format!("{}-{}", dep_package.name, dep_package.version);
-            if dep
-                .dep_kinds
-                .iter()
-                .any(|dk| dk.kind == DependencyKind::Normal)
-            {
-                // Normal dependencies
-                rust_binary
-                    .deps
-                    .insert(format!("{dep_prefix}{dep_name}:{dep_name}"));
-            }
+    let lib_targets = package
+        .targets
+        .iter()
+        .filter(|t| {
+            t.kind.contains(&cargo_metadata::TargetKind::Lib)
+                || t.kind.contains(&cargo_metadata::TargetKind::CDyLib)
+                || t.kind.contains(&cargo_metadata::TargetKind::DyLib)
+                || t.kind.contains(&cargo_metadata::TargetKind::RLib)
+                || t.kind.contains(&cargo_metadata::TargetKind::StaticLib)
+                || t.kind.contains(&cargo_metadata::TargetKind::ProcMacro)
+        })
+        .collect::<Vec<_>>();
+
+    let mut buck_rules: Vec<Rule> = Vec::new();
+
+    let cwd = std::env::current_dir().expect("Failed to get current directory");
+    let manifest_dir = Utf8PathBuf::from(cwd.to_str().unwrap());
+
+    // emit buck rules for bin targets
+    for bin_target in &bin_targets {
+        let buckal_name = bin_target.name.to_owned();
+
+        let rust_binary = emit_rust_binary(
+            &package,
+            node,
+            packages_map,
+            bin_target,
+            &manifest_dir,
+            &buckal_name,
+        );
+
+        buck_rules.push(Rule::CargoRustBinary(rust_binary));
+
+        // Check if the package has a build script
+        let custom_build_target = package
+            .targets
+            .iter()
+            .find(|t| t.kind.contains(&cargo_metadata::TargetKind::CustomBuild));
+
+        if let Some(build_target) = custom_build_target {
+            // create the build script rule
+            let buildscript_build = emit_buildscript_build(
+                buck_rules.last_mut().unwrap().as_cargo_rule_mut().unwrap(),
+                build_target,
+                &package,
+                node,
+                packages_map,
+                &buckal_name,
+                &manifest_dir,
+            );
+            buck_rules.push(Rule::CargoRustBinary(buildscript_build));
+
+            // create the build script run rule
+            let buildscript_run = emit_buildscript_run(&package, node, &buckal_name, build_target);
+            buck_rules.push(Rule::BuildscriptRun(buildscript_run));
         }
     }
 
-    // Check if the package has a build script
-    let custom_build_target = package
-        .targets
-        .iter()
-        .find(|t| t.kind.contains(&cargo_metadata::TargetKind::CustomBuild));
-
-    if let Some(build_target) = custom_build_target {
-        // process the build script in rust_binary
-        rust_binary.env.insert(
-            "OUT_DIR".to_owned(),
-            format!("$(location :{buckal_name}-build-script-run[out_dir])").to_owned(),
-        );
-        rust_binary.rustc_flags.insert(
-            format!("@$(location :{buckal_name}-build-script-run[rustc_flags])").to_owned(),
-        );
-        buck_rules.push(Rule::CargoRustBinary(rust_binary));
-
-        // create the build script rule
-        let mut buildscript_build = CargoRustBinary {
-            name: format!("{}-{}", buckal_name, build_target.name),
-            srcs: Glob {
-                include: Set::from(["**/**".to_owned()]),
-                exclude: Set::from(["BUCK".to_owned()]),
-            },
-            crate_name: build_target.name.to_owned(),
-            edition: package.edition.to_string(),
-            env: gen_cargo_env(&package),
-            features: Set::from_iter(node.features.iter().map(|f| f.to_string())),
-            ..Default::default()
+    // emit buck rules for lib targets
+    for lib_target in lib_targets {
+        let buckal_name = if bin_targets.iter().any(|b| b.name == lib_target.name) {
+            format!("lib{}", lib_target.name)
+        } else {
+            lib_target.name.to_owned()
         };
 
-        // Set the crate root path for the build script
-        buildscript_build.crate_root = build_target
-            .src_path
-            .to_owned()
-            .strip_prefix(&manifest_dir)
-            .expect("Failed to get library source path")
-            .to_string();
+        let rust_library = emit_rust_library(
+            &package,
+            node,
+            packages_map,
+            lib_target,
+            &manifest_dir,
+            &buckal_name,
+        );
 
-        // Set dependencies for the build script
-        for dep in &node.deps {
-            if let Some(dep_package) = packages_map.get(&dep.pkg) {
-                let dep_name = format!("{}-{}", dep_package.name, dep_package.version);
-                if dep
-                    .dep_kinds
-                    .iter()
-                    .any(|dk| dk.kind == DependencyKind::Build)
-                {
-                    // Build dependencies
-                    buildscript_build
-                        .deps
-                        .insert(format!("{dep_prefix}{dep_name}:{dep_name}"));
-                }
-            }
+        buck_rules.push(Rule::CargoRustLibrary(rust_library));
+
+        // Check if the package has a build script
+        let custom_build_target = package
+            .targets
+            .iter()
+            .find(|t| t.kind.contains(&cargo_metadata::TargetKind::CustomBuild));
+
+        if let Some(build_target) = custom_build_target {
+            // create the build script build rule
+            let buildscript_build = emit_buildscript_build(
+                buck_rules.last_mut().unwrap().as_cargo_rule_mut().unwrap(),
+                build_target,
+                &package,
+                node,
+                packages_map,
+                &buckal_name,
+                &manifest_dir,
+            );
+            buck_rules.push(Rule::CargoRustBinary(buildscript_build));
+
+            // create the build script run rule
+            let buildscript_run = emit_buildscript_run(&package, node, &buckal_name, build_target);
+            buck_rules.push(Rule::BuildscriptRun(buildscript_run));
         }
-        buck_rules.push(Rule::CargoRustBinary(buildscript_build));
-
-        // create the build script run rule
-        let buildscript_run = BuildscriptRun {
-            name: format!("{buckal_name}-build-script-run"),
-            package_name: package.name.to_string(),
-            buildscript_rule: format!(":{}-{}", buckal_name, build_target.name),
-            features: Set::from_iter(node.features.iter().map(|f| f.to_string())),
-            version: package.version.to_string(),
-            local_manifest_dir: "**".to_owned(),
-            ..Default::default()
-        };
-        buck_rules.push(Rule::BuildscriptRun(buildscript_run));
-    } else {
-        // No build script, all rules done!
-        buck_rules.push(Rule::CargoRustBinary(rust_binary));
     }
 
     buck_rules
@@ -386,4 +293,261 @@ pub fn check_dep_target(dk: &DepKindInfo) -> bool {
     let cfgs = get_cfgs();
 
     platform.matches(&target, &cfgs[..])
+}
+
+fn set_deps(
+    rust_rule: &mut dyn CargoRule,
+    node: &Node,
+    packages_map: &HashMap<PackageId, Package>,
+    is_build_script: bool,
+) {
+    for dep in &node.deps {
+        if let Some(dep_package) = packages_map.get(&dep.pkg) {
+            let dep_name = format!("{}-{}", dep_package.name, dep_package.version);
+            let dep_package_name = dep_package.name.to_string();
+            if dep.dep_kinds.iter().any(|dk| {
+                (!is_build_script && dk.kind == DependencyKind::Normal
+                    || is_build_script && dk.kind == DependencyKind::Build)
+                    && check_dep_target(dk)
+            }) {
+                // Normal dependencies and build dependencies for `build.rs` on current arch
+                if dep_package.source.is_none() {
+                    // first-party dependency
+                    let buck2_root = get_buck2_root();
+                    if buck2_root.is_empty() {
+                        return;
+                    }
+                    let buck2_root = PathBuf::from(buck2_root.trim());
+                    let manifest_path = PathBuf::from(&dep_package.manifest_path);
+                    let manifest_dir = manifest_path.parent().unwrap();
+                    let relative = manifest_dir.strip_prefix(&buck2_root).ok();
+
+                    if relative.is_none() {
+                        eprintln!("error: Current directory is not inside the Buck2 project root.");
+                        return;
+                    }
+                    let mut relative_path = relative.unwrap().to_string_lossy().into_owned();
+
+                    if !relative_path.is_empty() {
+                        relative_path += "/";
+                    }
+
+                    let target = format!("//{relative_path}...");
+
+                    match Buck2Command::targets().arg(target).arg("--json").output() {
+                        Ok(output) if output.status.success() => {
+                            let json_str = String::from_utf8_lossy(&output.stdout);
+                            let targets: Vec<Value> = serde_json::from_str(&json_str).unwrap();
+                            let target_item = targets
+                                .iter()
+                                .find(|t| {
+                                    t.get("buck.type")
+                                        .and_then(|k| k.as_str())
+                                        .is_some_and(|k| k.ends_with("rust_library"))
+                                })
+                                .expect("Failed to find rust library rule in BUCK file");
+                            let buck_package = target_item
+                                .get("buck.package")
+                                .and_then(|n| n.as_str())
+                                .expect("Failed to get target name")
+                                .strip_prefix("root")
+                                .unwrap();
+                            let buck_name = target_item
+                                .get("name")
+                                .and_then(|n| n.as_str())
+                                .expect("Failed to get target name");
+
+                            if dep.name != dep_package_name {
+                                // renamed dependency
+                                rust_rule.named_deps_mut().insert(
+                                    dep.name.clone(),
+                                    format!("{buck_package}:{buck_name}"),
+                                );
+                            } else {
+                                rust_rule
+                                    .deps_mut()
+                                    .insert(format!("{buck_package}:{buck_name}"));
+                            }
+                        }
+                        Ok(output) => {
+                            panic!("{}", String::from_utf8_lossy(&output.stderr));
+                        }
+                        Err(e) => {
+                            panic!("Failed to execute buck2 command: {}", e);
+                        }
+                    }
+                } else {
+                    // third-party dependency
+                    if dep.name != dep_package_name {
+                        // renamed dependency
+                        rust_rule.named_deps_mut().insert(
+                            dep.name.clone(),
+                            format!("//{RUST_CRATES_ROOT}/{dep_name}:{dep_name}"),
+                        );
+                    } else {
+                        rust_rule
+                            .deps_mut()
+                            .insert(format!("//{RUST_CRATES_ROOT}/{dep_name}:{dep_name}"));
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Emit `cargo.rust_library` rule for the given lib target
+fn emit_rust_library(
+    package: &Package,
+    node: &Node,
+    packages_map: &HashMap<PackageId, Package>,
+    lib_target: &Target,
+    manifest_dir: &Utf8PathBuf,
+    buckal_name: &str,
+) -> CargoRustLibrary {
+    let mut rust_library = CargoRustLibrary {
+        name: buckal_name.to_owned(),
+        srcs: Glob {
+            include: Set::from(["**/**".to_owned()]),
+            exclude: Set::from(["BUCK".to_owned()]),
+        },
+        crate_name: package.name.to_string(),
+        edition: package.edition.to_string(),
+        env: gen_cargo_env(package),
+        features: Set::from_iter(node.features.iter().map(|f| f.to_string())),
+        visibility: Set::from(["PUBLIC".to_owned()]),
+        ..Default::default()
+    };
+
+    if lib_target
+        .kind
+        .contains(&cargo_metadata::TargetKind::ProcMacro)
+    {
+        rust_library.proc_macro = Some(true);
+    }
+
+    // Set the crate root path
+    rust_library.crate_root = lib_target
+        .src_path
+        .to_owned()
+        .strip_prefix(manifest_dir)
+        .expect("Failed to get library source path")
+        .to_string();
+
+    // Set dependencies
+    set_deps(&mut rust_library, node, packages_map, false);
+
+    rust_library
+}
+
+/// Emit `cargo.rust_binary` rule for the given bin target
+fn emit_rust_binary(
+    package: &Package,
+    node: &Node,
+    packages_map: &HashMap<PackageId, Package>,
+    bin_target: &Target,
+    manifest_dir: &Utf8PathBuf,
+    buckal_name: &str,
+) -> CargoRustBinary {
+    let mut rust_binary = CargoRustBinary {
+        name: buckal_name.to_owned(),
+        srcs: Glob {
+            include: Set::from(["**/**".to_owned()]),
+            exclude: Set::from(["BUCK".to_owned()]),
+        },
+        crate_name: package.name.to_string(),
+        edition: package.edition.to_string(),
+        env: gen_cargo_env(package),
+        features: Set::from_iter(node.features.iter().map(|f| f.to_string())),
+        visibility: Set::from(["PUBLIC".to_owned()]),
+        ..Default::default()
+    };
+
+    // Set the crate root path
+    rust_binary.crate_root = bin_target
+        .src_path
+        .to_owned()
+        .strip_prefix(manifest_dir)
+        .expect("Failed to get binary source path")
+        .to_string();
+
+    // Set dependencies
+    set_deps(&mut rust_binary, node, packages_map, false);
+
+    rust_binary
+}
+
+/// Emit `buildscript_build` rule for the given build target
+fn emit_buildscript_build(
+    rust_rule: &mut dyn CargoRule,
+    build_target: &Target,
+    package: &Package,
+    node: &Node,
+    packages_map: &HashMap<PackageId, Package>,
+    buckal_name: &String,
+    manifest_dir: &Utf8PathBuf,
+) -> CargoRustBinary {
+    // process the build script in rust_library
+    let build_name = get_build_name(&build_target.name);
+    rust_rule.env_mut().insert(
+        "OUT_DIR".to_owned(),
+        format!("$(location :{buckal_name}-{build_name}-run[out_dir])").to_owned(),
+    );
+    rust_rule
+        .rustc_flags_mut()
+        .insert(format!("@$(location :{buckal_name}-{build_name}-run[rustc_flags])").to_owned());
+
+    // create the build script rule
+    let mut buildscript_build = CargoRustBinary {
+        name: format!("{}-{}", buckal_name, build_target.name),
+        srcs: Glob {
+            include: Set::from(["**/**".to_owned()]),
+            exclude: Set::from(["BUCK".to_owned()]),
+        },
+        crate_name: build_target.name.to_owned(),
+        edition: package.edition.to_string(),
+        env: gen_cargo_env(package),
+        features: Set::from_iter(node.features.iter().map(|f| f.to_string())),
+        ..Default::default()
+    };
+
+    // Set the crate root path for the build script
+    buildscript_build.crate_root = build_target
+        .src_path
+        .to_owned()
+        .strip_prefix(manifest_dir)
+        .expect("Failed to get library source path")
+        .to_string();
+
+    // Set dependencies for the build script
+    set_deps(&mut buildscript_build, node, packages_map, true);
+
+    buildscript_build
+}
+
+/// Emit `buildscript_run` rule for the given build target
+fn emit_buildscript_run(
+    package: &Package,
+    node: &Node,
+    buckal_name: &String,
+    build_target: &Target,
+) -> BuildscriptRun {
+    // create the build script run rule
+    let build_name = get_build_name(&build_target.name);
+    BuildscriptRun {
+        name: format!("{buckal_name}-{}-run", build_name),
+        package_name: package.name.to_string(),
+        buildscript_rule: format!(":{}-{}", buckal_name, build_target.name),
+        features: Set::from_iter(node.features.iter().map(|f| f.to_string())),
+        version: package.version.to_string(),
+        local_manifest_dir: "**".to_owned(),
+        ..Default::default()
+    }
+}
+
+fn get_build_name(s: &str) -> Cow<'_, str> {
+    if let Some(stripped) = s.strip_suffix("-build") {
+        Cow::Owned(stripped.to_string())
+    } else {
+        Cow::Borrowed(s)
+    }
 }

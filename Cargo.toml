@@ -19,3 +19,4 @@ inquire = "0.7.5"
 toml = "0.8"
 pyo3 = { version = "0.26.0", features = ["auto-initialize"] }
 pyo3-ffi = "0.26.0"
+serde_json = "1.0.143"

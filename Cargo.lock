@@ -102,6 +102,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_derive",
+ "serde_json",
  "serde_starlark",
  "toml",
 ]

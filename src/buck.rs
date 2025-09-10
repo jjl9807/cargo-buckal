@@ -16,6 +16,23 @@ pub enum Rule {
     BuildscriptRun(BuildscriptRun),
 }
 
+impl Rule {
+    pub fn as_cargo_rule_mut(&mut self) -> Option<&mut dyn CargoRule> {
+        match self {
+            Rule::CargoRustLibrary(inner) => Some(inner),
+            Rule::CargoRustBinary(inner) => Some(inner),
+            _ => None,
+        }
+    }
+}
+
+pub trait CargoRule {
+    fn deps_mut(&mut self) -> &mut Set<String>;
+    fn rustc_flags_mut(&mut self) -> &mut Set<String>;
+    fn env_mut(&mut self) -> &mut Map<String, String>;
+    fn named_deps_mut(&mut self) -> &mut Map<String, String>;
+}
+
 #[derive(Debug)]
 pub struct Load {
     pub bzl: String,
@@ -39,6 +56,8 @@ pub struct CargoRustLibrary {
     pub rustc_flags: Set<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub proc_macro: Option<bool>,
+    #[serde(skip_serializing_if = "Map::is_empty")]
+    pub named_deps: Map<String, String>,
     pub visibility: Set<String>,
     #[serde(skip_serializing_if = "Set::is_empty")]
     pub deps: Set<String>,
@@ -59,8 +78,8 @@ pub struct CargoRustBinary {
     pub features: Set<String>,
     #[serde(skip_serializing_if = "Set::is_empty")]
     pub rustc_flags: Set<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub proc_macro: Option<bool>,
+    #[serde(skip_serializing_if = "Map::is_empty")]
+    pub named_deps: Map<String, String>,
     pub visibility: Set<String>,
     #[serde(skip_serializing_if = "Set::is_empty")]
     pub deps: Set<String>,
@@ -78,6 +97,8 @@ pub struct BuildscriptRun {
     pub features: Set<String>,
     pub version: String,
     pub local_manifest_dir: String,
+    #[serde(skip_serializing_if = "Set::is_empty")]
+    pub visibility: Set<String>,
 }
 
 #[derive(Default, Debug)]
@@ -143,6 +164,42 @@ impl Glob {
     }
 }
 
+impl CargoRule for CargoRustLibrary {
+    fn deps_mut(&mut self) -> &mut Set<String> {
+        &mut self.deps
+    }
+
+    fn rustc_flags_mut(&mut self) -> &mut Set<String> {
+        &mut self.rustc_flags
+    }
+
+    fn env_mut(&mut self) -> &mut Map<String, String> {
+        &mut self.env
+    }
+
+    fn named_deps_mut(&mut self) -> &mut Map<String, String> {
+        &mut self.named_deps
+    }
+}
+
+impl CargoRule for CargoRustBinary {
+    fn deps_mut(&mut self) -> &mut Set<String> {
+        &mut self.deps
+    }
+
+    fn rustc_flags_mut(&mut self) -> &mut Set<String> {
+        &mut self.rustc_flags
+    }
+
+    fn env_mut(&mut self) -> &mut Map<String, String> {
+        &mut self.env
+    }
+
+    fn named_deps_mut(&mut self) -> &mut Map<String, String> {
+        &mut self.named_deps
+    }
+}
+
 impl CargoRustLibrary {
     fn from_py_dict(kwargs: &Bound<'_, PyDict>) -> PyResult<Self> {
         let name: String = kwargs
@@ -198,6 +255,11 @@ impl CargoRustLibrary {
             .expect("Expected 'proc_macro' argument")
             .and_then(|v| v.extract().ok())
             .unwrap_or_default();
+        let named_deps: Map<String, String> = kwargs
+            .get_item("named_deps")
+            .expect("Expected 'named_deps' argument")
+            .and_then(|v| v.extract().ok())
+            .unwrap_or_default();
         let visibility_vec: Vec<String> = kwargs
             .get_item("visibility")
             .expect("Expected 'visibility' argument")
@@ -220,6 +282,7 @@ impl CargoRustLibrary {
             features,
             rustc_flags,
             proc_macro,
+            named_deps,
             visibility,
             deps,
         })
@@ -249,9 +312,6 @@ impl CargoRustLibrary {
             .cloned()
             .collect();
         self.visibility.extend(to_add);
-        // Patch deps set
-        let to_add: Vec<_> = other.deps.difference(&self.deps).cloned().collect();
-        self.deps.extend(to_add);
     }
 }
 
@@ -305,9 +365,9 @@ impl CargoRustBinary {
             .and_then(|v| v.extract().ok())
             .unwrap_or_default();
         let rustc_flags: Set<String> = rustc_flags_vec.into_iter().collect();
-        let proc_macro: Option<bool> = kwargs
-            .get_item("proc_macro")
-            .expect("Expected 'proc_macro' argument")
+        let named_deps: Map<String, String> = kwargs
+            .get_item("named_deps")
+            .expect("Expected 'named_deps' argument")
             .and_then(|v| v.extract().ok())
             .unwrap_or_default();
         let visibility_vec: Vec<String> = kwargs
@@ -331,7 +391,7 @@ impl CargoRustBinary {
             env,
             features,
             rustc_flags,
-            proc_macro,
+            named_deps,
             visibility,
             deps,
         })
@@ -361,9 +421,6 @@ impl CargoRustBinary {
             .cloned()
             .collect();
         self.visibility.extend(to_add);
-        // Patch deps set
-        let to_add: Vec<_> = other.deps.difference(&self.deps).cloned().collect();
-        self.deps.extend(to_add);
     }
 }
 
@@ -405,6 +462,12 @@ impl BuildscriptRun {
             .expect("Expected 'local_manifest_dir' argument")
             .and_then(|v| v.extract().ok())
             .unwrap_or_default();
+        let visibility_vec: Vec<String> = kwargs
+            .get_item("visibility")
+            .expect("Expected 'visibility' argument")
+            .and_then(|v| v.extract().ok())
+            .unwrap_or_default();
+        let visibility: Set<String> = visibility_vec.into_iter().collect();
         Ok(BuildscriptRun {
             name,
             package_name,
@@ -413,6 +476,7 @@ impl BuildscriptRun {
             features,
             version,
             local_manifest_dir,
+            visibility,
         })
     }
 
@@ -424,6 +488,13 @@ impl BuildscriptRun {
         // Patch features set
         let to_add: Vec<_> = other.features.difference(&self.features).cloned().collect();
         self.features.extend(to_add);
+        // Patch visibility set
+        let to_add: Vec<_> = other
+            .visibility
+            .difference(&self.visibility)
+            .cloned()
+            .collect();
+        self.visibility.extend(to_add);
     }
 }
 
