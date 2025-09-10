@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     collections::{BTreeMap as Map, BTreeSet as Set, HashMap},
     path::PathBuf,
     vec,
@@ -486,21 +487,14 @@ fn emit_buildscript_build(
     manifest_dir: &Utf8PathBuf,
 ) -> CargoRustBinary {
     // process the build script in rust_library
+    let build_name = get_build_name(&build_target.name);
     rust_rule.env_mut().insert(
         "OUT_DIR".to_owned(),
-        format!(
-            "$(location :{buckal_name}-{}-run[out_dir])",
-            build_target.name
-        )
-        .to_owned(),
+        format!("$(location :{buckal_name}-{build_name}-run[out_dir])").to_owned(),
     );
-    rust_rule.rustc_flags_mut().insert(
-        format!(
-            "@$(location :{buckal_name}-{}-run[rustc_flags])",
-            build_target.name
-        )
-        .to_owned(),
-    );
+    rust_rule
+        .rustc_flags_mut()
+        .insert(format!("@$(location :{buckal_name}-{build_name}-run[rustc_flags])").to_owned());
 
     // create the build script rule
     let mut buildscript_build = CargoRustBinary {
@@ -538,13 +532,22 @@ fn emit_buildscript_run(
     build_target: &Target,
 ) -> BuildscriptRun {
     // create the build script run rule
+    let build_name = get_build_name(&build_target.name);
     BuildscriptRun {
-        name: format!("{buckal_name}-{}-run", build_target.name),
+        name: format!("{buckal_name}-{}-run", build_name),
         package_name: package.name.to_string(),
         buildscript_rule: format!(":{}-{}", buckal_name, build_target.name),
         features: Set::from_iter(node.features.iter().map(|f| f.to_string())),
         version: package.version.to_string(),
         local_manifest_dir: "**".to_owned(),
         ..Default::default()
+    }
+}
+
+fn get_build_name(s: &str) -> Cow<str> {
+    if s.ends_with("-build") {
+        Cow::Owned(s[..s.len() - 6].to_string())
+    } else {
+        Cow::Borrowed(s)
     }
 }
