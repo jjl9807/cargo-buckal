@@ -318,9 +318,6 @@ impl CargoRustLibrary {
             .cloned()
             .collect();
         self.visibility.extend(to_add);
-        // Patch deps set
-        let to_add: Vec<_> = other.deps.difference(&self.deps).cloned().collect();
-        self.deps.extend(to_add);
     }
 }
 
@@ -436,9 +433,6 @@ impl CargoRustBinary {
             .cloned()
             .collect();
         self.visibility.extend(to_add);
-        // Patch deps set
-        let to_add: Vec<_> = other.deps.difference(&self.deps).cloned().collect();
-        self.deps.extend(to_add);
     }
 }
 
