@@ -193,11 +193,11 @@ pub fn buckify_root_node(node: &Node, packages_map: &HashMap<PackageId, Package>
 }
 
 pub fn vendor_package(package: &Package, is_override: bool) -> Utf8PathBuf {
-    // Vendor the package sources to `third-party/rust/crates/<package_name>-<version>`
+    // Vendor the package sources to `third-party/rust/crates/<package_name>/<version>`
     let manifest_path = package.manifest_path.clone();
     let src_path = manifest_path.parent().unwrap().to_owned();
     let target_path = Utf8PathBuf::from(get_buck2_root()).join(format!(
-        "{RUST_CRATES_ROOT}/{}-{}",
+        "{RUST_CRATES_ROOT}/{}/{}",
         package.name, package.version
     ));
     if !target_path.exists() {
@@ -382,12 +382,12 @@ fn set_deps(
                         // renamed dependency
                         rust_rule.named_deps_mut().insert(
                             dep.name.clone(),
-                            format!("//{RUST_CRATES_ROOT}/{dep_name}:{dep_name}"),
+                            format!("//{RUST_CRATES_ROOT}/{}/{}:{dep_name}", dep_package.name, dep_package.version),
                         );
                     } else {
                         rust_rule
                             .deps_mut()
-                            .insert(format!("//{RUST_CRATES_ROOT}/{dep_name}:{dep_name}"));
+                            .insert(format!("//{RUST_CRATES_ROOT}/{}/{}:{dep_name}", dep_package.name, dep_package.version));
                     }
                 }
             }
