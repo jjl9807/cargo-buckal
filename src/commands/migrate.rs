@@ -117,8 +117,7 @@ pub fn execute(args: &MigrateArgs) {
         if let Some(package_dir) = vendor_dir.parent()
             && package_dir.read_dir().unwrap().next().is_none()
         {
-            std::fs::remove_dir_all(package_dir)
-                .expect("Failed to remove empty package directory");
+            std::fs::remove_dir_all(package_dir).expect("Failed to remove empty package directory");
         }
     }
 
