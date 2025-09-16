@@ -1,0 +1,114 @@
+use std::collections::{HashMap, HashSet};
+
+use bincode::config::Configuration;
+use blake3::hash;
+use cargo_metadata::{Node, PackageId};
+use serde::{Deserialize, Serialize};
+
+use crate::utils::{get_cache_dir, get_cache_path};
+
+type Fingerprint = [u8; 32];
+
+pub trait BuckalExt {
+    fn fingerprint(&self) -> Fingerprint;
+}
+
+impl BuckalExt for Node {
+    fn fingerprint(&self) -> Fingerprint {
+        let encoded = bincode::serde::encode_to_vec(self, bincode::config::standard())
+            .expect("Serialization failed");
+        hash(&encoded).into()
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct BuckalCache {
+    fingerprints: HashMap<PackageId, Fingerprint>,
+    version: u32,
+}
+
+impl BuckalCache {
+    pub fn new(resolve: &HashMap<PackageId, Node>) -> Self {
+        let fingerprints = resolve
+            .iter()
+            .map(|(id, node)| (id.clone(), node.fingerprint()))
+            .collect();
+        Self {
+            fingerprints,
+            version: 1,
+        }
+    }
+
+    pub fn load() -> Self {
+        let cache_path = get_cache_path();
+        if !cache_path.exists() {
+            return Self {
+                fingerprints: HashMap::new(),
+                version: 1,
+            };
+        }
+        if let Ok(mut cache_reader) = std::fs::File::open(&cache_path) {
+            if let Ok(cache) = bincode::serde::decode_from_std_read::<
+                BuckalCache,
+                Configuration,
+                std::fs::File,
+            >(&mut cache_reader, bincode::config::standard())
+            {
+                if cache.version == 1 {
+                    return cache;
+                }
+            }
+        }
+        panic!("Failed to load cache or version mismatch");
+    }
+
+    pub fn save(&self) {
+        let cache_path = get_cache_path();
+        let cache_dir = get_cache_dir();
+        if !cache_dir.exists() {
+            std::fs::create_dir_all(&cache_dir).expect("Failed to create cache directory");
+        }
+
+        if let Ok(mut cache_writer) = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(&cache_path)
+        {
+            let _ = bincode::serde::encode_into_std_write(
+                self,
+                &mut cache_writer,
+                bincode::config::standard(),
+            );
+        } else {
+            panic!("Failed to open cache file for writing");
+        }
+    }
+
+    pub fn diff(&self, other: &BuckalCache) -> BuckalChange {
+        let mut diff_result = BuckalChange::default();
+        for (id, fp) in &self.fingerprints {
+            if let Some(other_fp) = other.fingerprints.get(id) {
+                if fp != other_fp {
+                    diff_result.changed.insert(id.clone());
+                }
+            } else {
+                // new package added in self
+                diff_result.added.insert(id.clone());
+            }
+        }
+        for (id, _) in &other.fingerprints {
+            if !self.fingerprints.contains_key(id) {
+                // redundant package removed in self
+                diff_result.removed.insert(id.clone());
+            }
+        }
+        diff_result
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct BuckalChange {
+    pub added: HashSet<PackageId>,
+    pub removed: HashSet<PackageId>,
+    pub changed: HashSet<PackageId>,
+}

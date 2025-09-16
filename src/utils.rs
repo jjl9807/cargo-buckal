@@ -1,9 +1,11 @@
 use std::{io, process::Command, str::FromStr};
 
+use cargo_metadata::camino::Utf8PathBuf;
 use cargo_platform::Cfg;
 use colored::Colorize;
 use inquire::Select;
 
+use crate::RUST_CRATES_ROOT;
 use crate::buck2::Buck2Command;
 
 pub fn check_buck2_installed() -> bool {
@@ -288,4 +290,19 @@ pub fn get_cfgs() -> Vec<Cfg> {
         .lines()
         .map(|line| Cfg::from_str(line).unwrap())
         .collect()
+}
+
+pub fn get_cache_dir() -> Utf8PathBuf {
+    Utf8PathBuf::from(get_buck2_root()).join(".buckal")
+}
+
+pub fn get_cache_path() -> Utf8PathBuf {
+    Utf8PathBuf::from(get_cache_dir()).join("cache")
+}
+
+pub fn get_vendor_dir(name: &str, version: &str) -> Utf8PathBuf {
+    Utf8PathBuf::from(get_buck2_root()).join(format!(
+        "{RUST_CRATES_ROOT}/{}/{}",
+        name, version
+    ))
 }

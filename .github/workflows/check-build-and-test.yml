@@ -16,7 +16,7 @@ jobs:
     strategy:
       fail-fast: false
 
-    name: Setup and cache
+    name: Setup and Cache
     runs-on: ubuntu-latest
 
     env:

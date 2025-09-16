@@ -16,7 +16,7 @@ use crate::{
     RUST_CRATES_ROOT,
     buck::{BuildscriptRun, CargoRule, CargoRustBinary, CargoRustLibrary, Glob, Load, Rule},
     buck2::Buck2Command,
-    utils::{get_buck2_root, get_cfgs, get_target},
+    utils::{get_buck2_root, get_cfgs, get_target, get_vendor_dir},
 };
 
 pub fn buckify_dep_node(node: &Node, packages_map: &HashMap<PackageId, Package>) -> Vec<Rule> {
@@ -196,10 +196,7 @@ pub fn vendor_package(package: &Package, is_override: bool) -> Utf8PathBuf {
     // Vendor the package sources to `third-party/rust/crates/<package_name>/<version>`
     let manifest_path = package.manifest_path.clone();
     let src_path = manifest_path.parent().unwrap().to_owned();
-    let target_path = Utf8PathBuf::from(get_buck2_root()).join(format!(
-        "{RUST_CRATES_ROOT}/{}/{}",
-        package.name, package.version
-    ));
+    let target_path = get_vendor_dir(&package.name, &package.version.to_string());
     if !target_path.exists() {
         std::fs::create_dir_all(&target_path).expect("Failed to create target directory");
     }
@@ -382,12 +379,16 @@ fn set_deps(
                         // renamed dependency
                         rust_rule.named_deps_mut().insert(
                             dep.name.clone(),
-                            format!("//{RUST_CRATES_ROOT}/{}/{}:{dep_name}", dep_package.name, dep_package.version),
+                            format!(
+                                "//{RUST_CRATES_ROOT}/{}/{}:{dep_name}",
+                                dep_package.name, dep_package.version
+                            ),
                         );
                     } else {
-                        rust_rule
-                            .deps_mut()
-                            .insert(format!("//{RUST_CRATES_ROOT}/{}/{}:{dep_name}", dep_package.name, dep_package.version));
+                        rust_rule.deps_mut().insert(format!(
+                            "//{RUST_CRATES_ROOT}/{}/{}:{dep_name}",
+                            dep_package.name, dep_package.version
+                        ));
                     }
                 }
             }
