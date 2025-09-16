@@ -101,9 +101,10 @@ pub fn execute(args: &MigrateArgs) {
         }
     }
 
+    let re = Regex::new(r"^([^+#]+)\+([^#]+)#([^@]+)@([^+#]+)(?:\+(.+))?$")
+        .expect("error creating regex");
+
     for id in changes.removed.iter() {
-        let re = Regex::new(r"^([^+#]+)\+([^#]+)#([^@]+)@([^+#]+)(?:\+(.+))?$")
-            .expect("error creating regex");
         let caps = re.captures(&id.repr).expect("Failed to parse package ID");
         let name = &caps[3];
         let version = &caps[4];
@@ -113,11 +114,11 @@ pub fn execute(args: &MigrateArgs) {
         if vendor_dir.exists() {
             std::fs::remove_dir_all(&vendor_dir).expect("Failed to remove vendor directory");
         }
-        if let Some(package_dir) = vendor_dir.parent() {
-            if package_dir.read_dir().unwrap().next().is_none() {
-                std::fs::remove_dir_all(&package_dir)
-                    .expect("Failed to remove empty package directory");
-            }
+        if let Some(package_dir) = vendor_dir.parent()
+            && package_dir.read_dir().unwrap().next().is_none()
+        {
+            std::fs::remove_dir_all(package_dir)
+                .expect("Failed to remove empty package directory");
         }
     }
 

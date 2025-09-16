@@ -297,12 +297,9 @@ pub fn get_cache_dir() -> Utf8PathBuf {
 }
 
 pub fn get_cache_path() -> Utf8PathBuf {
-    Utf8PathBuf::from(get_cache_dir()).join("cache")
+    get_cache_dir().join("cache")
 }
 
 pub fn get_vendor_dir(name: &str, version: &str) -> Utf8PathBuf {
-    Utf8PathBuf::from(get_buck2_root()).join(format!(
-        "{RUST_CRATES_ROOT}/{}/{}",
-        name, version
-    ))
+    Utf8PathBuf::from(get_buck2_root()).join(format!("{RUST_CRATES_ROOT}/{}/{}", name, version))
 }

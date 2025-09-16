@@ -47,17 +47,14 @@ impl BuckalCache {
                 version: 1,
             };
         }
-        if let Ok(mut cache_reader) = std::fs::File::open(&cache_path) {
-            if let Ok(cache) = bincode::serde::decode_from_std_read::<
+        if let Ok(mut cache_reader) = std::fs::File::open(&cache_path)
+            && let Ok(cache) = bincode::serde::decode_from_std_read::<
                 BuckalCache,
                 Configuration,
                 std::fs::File,
             >(&mut cache_reader, bincode::config::standard())
-            {
-                if cache.version == 1 {
-                    return cache;
-                }
-            }
+        {
+            return cache;
         }
         panic!("Failed to load cache or version mismatch");
     }
@@ -72,6 +69,7 @@ impl BuckalCache {
         if let Ok(mut cache_writer) = std::fs::OpenOptions::new()
             .write(true)
             .create(true)
+            .truncate(true)
             .open(&cache_path)
         {
             let _ = bincode::serde::encode_into_std_write(
@@ -96,7 +94,7 @@ impl BuckalCache {
                 diff_result.added.insert(id.clone());
             }
         }
-        for (id, _) in &other.fingerprints {
+        for id in other.fingerprints.keys() {
             if !self.fingerprints.contains_key(id) {
                 // redundant package removed in self
                 diff_result.removed.insert(id.clone());
