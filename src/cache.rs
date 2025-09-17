@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 
 use bincode::config::Configuration;
 use blake3::hash;
@@ -83,30 +83,35 @@ impl BuckalCache {
     }
 
     pub fn diff(&self, other: &BuckalCache) -> BuckalChange {
-        let mut diff_result = BuckalChange::default();
+        let mut _diff = BuckalChange::default();
         for (id, fp) in &self.fingerprints {
             if let Some(other_fp) = other.fingerprints.get(id) {
                 if fp != other_fp {
-                    diff_result.changed.insert(id.clone());
+                    _diff.changes.insert(id.to_owned(), ChangeType::Changed);
                 }
             } else {
                 // new package added in self
-                diff_result.added.insert(id.clone());
+                _diff.changes.insert(id.clone(), ChangeType::Added);
             }
         }
         for id in other.fingerprints.keys() {
             if !self.fingerprints.contains_key(id) {
                 // redundant package removed in self
-                diff_result.removed.insert(id.clone());
+                _diff.changes.insert(id.clone(), ChangeType::Removed);
             }
         }
-        diff_result
+        _diff
     }
 }
 
 #[derive(Debug, Default)]
 pub struct BuckalChange {
-    pub added: HashSet<PackageId>,
-    pub removed: HashSet<PackageId>,
-    pub changed: HashSet<PackageId>,
+    pub changes: BTreeMap<PackageId, ChangeType>,
+}
+
+#[derive(Debug)]
+pub enum ChangeType {
+    Added,
+    Removed,
+    Changed,
 }

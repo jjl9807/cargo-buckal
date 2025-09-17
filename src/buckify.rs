@@ -8,14 +8,22 @@ use std::{
 use cargo_metadata::{
     DepKindInfo, DependencyKind, Node, Package, PackageId, Target, camino::Utf8PathBuf,
 };
+use colored::Colorize;
 use fs_extra::dir::{CopyOptions, copy};
 use itertools::Itertools;
+use regex::Regex;
 use serde_json::Value;
 
 use crate::{
     RUST_CRATES_ROOT,
-    buck::{BuildscriptRun, CargoRule, CargoRustBinary, CargoRustLibrary, Glob, Load, Rule},
+    buck::{
+        BuildscriptRun, CargoRule, CargoRustBinary, CargoRustLibrary, Glob, Load, Rule,
+        parse_buck_file, patch_buck_rules,
+    },
     buck2::Buck2Command,
+    buckal_log,
+    cache::{BuckalChange, ChangeType},
+    context::BuckalContext,
     utils::{get_buck2_root, get_cfgs, get_target, get_vendor_dir},
 };
 
@@ -192,7 +200,7 @@ pub fn buckify_root_node(node: &Node, packages_map: &HashMap<PackageId, Package>
     buck_rules
 }
 
-pub fn vendor_package(package: &Package, is_override: bool) -> Utf8PathBuf {
+pub fn vendor_package(package: &Package) -> Utf8PathBuf {
     // Vendor the package sources to `third-party/rust/crates/<package_name>/<version>`
     let manifest_path = package.manifest_path.clone();
     let src_path = manifest_path.parent().unwrap().to_owned();
@@ -201,8 +209,8 @@ pub fn vendor_package(package: &Package, is_override: bool) -> Utf8PathBuf {
         std::fs::create_dir_all(&target_path).expect("Failed to create target directory");
     }
     let copy_options = CopyOptions {
-        skip_exist: !is_override,
-        overwrite: is_override,
+        skip_exist: false,
+        overwrite: true,
         content_only: true,
         ..Default::default()
     };
@@ -551,4 +559,100 @@ fn get_build_name(s: &str) -> Cow<'_, str> {
     } else {
         Cow::Borrowed(s)
     }
+}
+
+impl BuckalChange {
+    pub fn apply(&self, ctx: &BuckalContext) {
+        // This function applies changes to the BUCK files of detected packages in the cache diff, but skips the root package.
+        let re = Regex::new(r"^([^+#]+)\+([^#]+)#([^@]+)@([^+#]+)(?:\+(.+))?$")
+            .expect("error creating regex");
+
+        for (id, change_type) in &self.changes {
+            match change_type {
+                ChangeType::Added | ChangeType::Changed => {
+                    // Skip root package
+                    if id == &ctx.root.id {
+                        continue;
+                    }
+
+                    if let Some(node) = ctx.nodes_map.get(id) {
+                        let package = ctx.packages_map.get(id).unwrap();
+
+                        // Skip local packages
+                        if package.source.is_none() {
+                            continue;
+                        }
+
+                        buckal_log!(
+                            if let ChangeType::Added = change_type {
+                                "Adding"
+                            } else {
+                                "Updating"
+                            },
+                            format!("{} v{}", package.name, package.version)
+                        );
+
+                        // Vendor package sources
+                        let vendor_path = vendor_package(package);
+
+                        // Generate BUCK rules
+                        let mut buck_rules = buckify_dep_node(node, &ctx.packages_map);
+
+                        // Patch BUCK Rules
+                        let buck_path = vendor_path.join("BUCK");
+                        if buck_path.exists() {
+                            let existing_rules = parse_buck_file(&buck_path)
+                                .expect("Failed to parse existing BUCK file");
+                            patch_buck_rules(&existing_rules, &mut buck_rules);
+                        } else {
+                            std::fs::File::create(&buck_path).expect("Failed to create BUCK file");
+                        }
+
+                        // Generate the BUCK file
+                        let buck_content = gen_buck_content(&buck_rules);
+                        std::fs::write(&buck_path, buck_content)
+                            .expect("Failed to write BUCK file");
+                    }
+                }
+                ChangeType::Removed => {
+                    let caps = re.captures(&id.repr).expect("Failed to parse package ID");
+                    let name = &caps[3];
+                    let version = &caps[4];
+
+                    buckal_log!("Removing", format!("{} v{}", name, version));
+                    let vendor_dir = get_vendor_dir(name, version);
+                    if vendor_dir.exists() {
+                        std::fs::remove_dir_all(&vendor_dir)
+                            .expect("Failed to remove vendor directory");
+                    }
+                    if let Some(package_dir) = vendor_dir.parent()
+                        && package_dir.read_dir().unwrap().next().is_none()
+                    {
+                        std::fs::remove_dir_all(package_dir)
+                            .expect("Failed to remove empty package directory");
+                    }
+                }
+            }
+        }
+    }
+}
+
+pub fn flush_root(ctx: &BuckalContext) {
+    buckal_log!(
+        "Flushing",
+        format!("{} v{}", ctx.root.name, ctx.root.version)
+    );
+    let root_node = ctx
+        .nodes_map
+        .get(&ctx.root.id)
+        .expect("Root node not found");
+    let cwd = std::env::current_dir().expect("Failed to get current directory");
+    let buck_path = Utf8PathBuf::from(cwd.to_str().unwrap()).join("BUCK");
+
+    // Generate BUCK rules
+    let buck_rules = buckify_root_node(root_node, &ctx.packages_map);
+
+    // Generate the BUCK file
+    let buck_content = gen_buck_content(&buck_rules);
+    std::fs::write(&buck_path, buck_content).expect("Failed to write BUCK file");
 }
