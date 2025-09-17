@@ -1,10 +1,28 @@
+use std::collections::HashMap;
 use std::{io, process::Command, str::FromStr};
 
+use cargo_metadata::MetadataCommand;
+use cargo_metadata::camino::Utf8PathBuf;
 use cargo_platform::Cfg;
 use colored::Colorize;
 use inquire::Select;
 
+use crate::RUST_CRATES_ROOT;
 use crate::buck2::Buck2Command;
+use crate::cache::BuckalCache;
+
+#[macro_export]
+macro_rules! buckal_log {
+    ($action:expr, $msg:expr) => {{
+        let colored = match $action {
+            "Adding" => $action.cyan().bold(),
+            "Flushing" => $action.green().bold(),
+            "Removing" => $action.red().bold(),
+            _ => $action.bold(),
+        };
+        println!("{:>12} {}", colored, $msg);
+    }};
+}
 
 pub fn check_buck2_installed() -> bool {
     Buck2Command::new()
@@ -288,4 +306,53 @@ pub fn get_cfgs() -> Vec<Cfg> {
         .lines()
         .map(|line| Cfg::from_str(line).unwrap())
         .collect()
+}
+
+pub fn get_cache_dir() -> Utf8PathBuf {
+    Utf8PathBuf::from(get_buck2_root()).join(".buckal")
+}
+
+pub fn get_cache_path() -> Utf8PathBuf {
+    get_cache_dir().join("cache")
+}
+
+pub fn get_vendor_dir(name: &str, version: &str) -> Utf8PathBuf {
+    Utf8PathBuf::from(get_buck2_root()).join(format!("{RUST_CRATES_ROOT}/{}/{}", name, version))
+}
+
+pub fn get_last_cache() -> BuckalCache {
+    // This function retrieves the last saved BuckalCache from the cache file.
+    // If the cache file does not exist, it returns a snapshot of the current state.
+    let cache_path = get_cache_path();
+    if !cache_path.exists() {
+        let cargo_metadata = MetadataCommand::new().exec().unwrap();
+        let resolve = cargo_metadata.resolve.unwrap();
+        let nodes_map = resolve
+            .nodes
+            .into_iter()
+            .map(|n| (n.id.to_owned(), n))
+            .collect::<HashMap<_, _>>();
+        BuckalCache::new(&nodes_map)
+    } else {
+        BuckalCache::load()
+    }
+}
+
+pub fn section(title: &str) {
+    let content = format!("---- {} ----", title);
+    let width = 60;
+
+    if content.len() >= width {
+        println!("{}", content);
+        return;
+    }
+
+    let total_padding = width - content.len();
+    let left_padding = total_padding / 2;
+    let right_padding = total_padding - left_padding;
+
+    let left_pad = "-".repeat(left_padding);
+    let right_pad = "-".repeat(right_padding);
+
+    println!("{}{}{}", left_pad, content, right_pad);
 }

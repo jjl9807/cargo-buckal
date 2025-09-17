@@ -1,4 +1,4 @@
-use std::process::{Command, Stdio};
+use std::process::Command;
 
 use clap::Parser;
 
@@ -10,19 +10,14 @@ use crate::{
 };
 
 #[derive(Parser, Debug)]
-pub struct AddArgs {
-    pub package: String,
-    #[arg(long, short = 'F')]
-    pub features: Option<String>,
-    #[arg(long)]
-    pub rename: Option<String>,
+pub struct UpdateArgs {
+    #[clap(value_name = "SPEC", num_args = 1..)]
+    packages: Vec<String>,
     #[arg(long, default_value = "false")]
-    pub dev: bool,
-    #[arg(long, default_value = "false")]
-    pub build: bool,
+    pub recursive: bool,
 }
 
-pub fn execute(args: &AddArgs) {
+pub fn execute(args: &UpdateArgs) {
     // Ensure Buck2 is installed before proceeding
     if let Err(e) = ensure_buck2_installed() {
         eprintln!("Error: {}", e);
@@ -37,22 +32,12 @@ pub fn execute(args: &AddArgs) {
 
     let mut cargo_cmd = Command::new("cargo");
     cargo_cmd
-        .arg("add")
-        .arg(&args.package)
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit());
-
-    if let Some(features) = &args.features {
-        cargo_cmd.arg("--features").arg(features);
-    }
-    if let Some(rename) = &args.rename {
-        cargo_cmd.arg("--rename").arg(rename);
-    }
-    if args.dev {
-        cargo_cmd.arg("--dev");
-    }
-    if args.build {
-        cargo_cmd.arg("--build");
+        .arg("update")
+        .args(&args.packages)
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit());
+    if args.recursive {
+        cargo_cmd.arg("--recursive");
     }
 
     // execute the cargo command
