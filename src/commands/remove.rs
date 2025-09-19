@@ -57,7 +57,7 @@ pub fn execute(args: &RemoveArgs) {
             return;
         }
 
-        section("Buckal Changelog");
+        section("Buckal Console");
 
         // get cargo metadata and generate context
         let ctx = BuckalContext::new();
