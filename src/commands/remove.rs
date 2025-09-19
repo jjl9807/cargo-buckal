@@ -3,10 +3,11 @@ use std::process::Command;
 use clap::Parser;
 
 use crate::{
+    buckal_error,
     buckify::flush_root,
     cache::BuckalCache,
     context::BuckalContext,
-    utils::{check_buck2_package, ensure_buck2_installed, get_last_cache, section},
+    utils::{check_buck2_package, ensure_prerequisites, get_last_cache, section},
 };
 
 #[derive(Parser, Debug)]
@@ -22,14 +23,17 @@ pub struct RemoveArgs {
 }
 
 pub fn execute(args: &RemoveArgs) {
-    // Ensure Buck2 is installed before proceeding
-    if let Err(e) = ensure_buck2_installed() {
-        eprintln!("Error: {}", e);
+    // Ensure all prerequisites are installed before proceeding
+    if let Err(e) = ensure_prerequisites() {
+        buckal_error!(e);
         std::process::exit(1);
     }
 
     // Check if the current directory is a valid Buck2 package
-    check_buck2_package();
+    if let Err(e) = check_buck2_package() {
+        buckal_error!(e);
+        std::process::exit(1);
+    }
 
     if args.auto {
         // TODO: implement automatic removal

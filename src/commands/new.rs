@@ -2,7 +2,7 @@ use std::{fs::OpenOptions, io::Write, process::Command};
 
 use clap::Parser;
 
-use crate::{RUST_CRATES_ROOT, buck2::Buck2Command, utils::ensure_buck2_installed};
+use crate::{RUST_CRATES_ROOT, buck2::Buck2Command, buckal_error, utils::ensure_prerequisites};
 
 #[derive(Parser, Debug)]
 pub struct NewArgs {
@@ -20,16 +20,16 @@ pub struct NewArgs {
 }
 
 pub fn execute(args: &NewArgs) {
-    // Ensure Buck2 is installed before proceeding
-    if let Err(e) = ensure_buck2_installed() {
-        eprintln!("Error: {}", e);
+    // Ensure all prerequisites are installed before proceeding
+    if let Err(e) = ensure_prerequisites() {
+        buckal_error!(e);
         std::process::exit(1);
     }
 
     if args.root {
         // Init a new buck2 repo
         if let Err(e) = Buck2Command::init().arg(&args.path).arg("--git").execute() {
-            eprintln!("Failed to execute buck2 init: {}", e);
+            buckal_error!(format!("failed to execute buck2 init:\n  {}", e));
             std::process::exit(1);
         }
         std::fs::create_dir_all(format!("{}/{}", args.path, RUST_CRATES_ROOT))

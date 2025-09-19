@@ -15,12 +15,20 @@ use crate::cache::BuckalCache;
 macro_rules! buckal_log {
     ($action:expr, $msg:expr) => {{
         let colored = match $action {
-            "Adding" => $action.cyan().bold(),
-            "Flushing" => $action.green().bold(),
-            "Removing" => $action.red().bold(),
-            _ => $action.bold(),
+            "Adding" => ::colored::Colorize::cyan($action),
+            "Flushing" => ::colored::Colorize::green($action),
+            "Removing" => ::colored::Colorize::yellow($action),
+            _ => ::colored::Colorize::blue($action),
         };
-        println!("{:>12} {}", colored, $msg);
+        println!("{:>12} {}", ::colored::Colorize::bold(colored), $msg);
+    }};
+}
+
+#[macro_export]
+macro_rules! buckal_error {
+    ($msg:expr) => {{
+        let error_prefix = ::colored::Colorize::red("error:");
+        println!("{} {}", ::colored::Colorize::bold(error_prefix), $msg);
     }};
 }
 
@@ -271,15 +279,17 @@ pub fn get_buck2_root() -> String {
     }
 }
 
-pub fn check_buck2_package() {
+pub fn check_buck2_package() -> io::Result<()> {
     // This function checks if the current directory is a valid Buck2 package.
     let cwd = std::env::current_dir().expect("Failed to get current directory");
     let buck_file = cwd.join("BUCK");
-    assert!(
-        buck_file.exists(),
-        "{}",
-        format!("error: could not find `BUCK` in `{}`", cwd.display())
-    );
+    if !buck_file.exists() {
+        return Err(io::Error::other(format!(
+            "could not find `BUCK` in `{}`. Are you in a Buck2 package?",
+            cwd.display(),
+        )));
+    }
+    Ok(())
 }
 
 pub fn get_target() -> String {
@@ -355,4 +365,27 @@ pub fn section(title: &str) {
     let right_pad = "-".repeat(right_padding);
 
     println!("{}{}{}", left_pad, content, right_pad);
+}
+
+pub fn check_python3_installed() -> bool {
+    Command::new("python3")
+        .arg("--version")
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+pub fn ensure_python3_installed() -> io::Result<()> {
+    if !check_python3_installed() {
+        return Err(io::Error::other(
+            "Python 3 is required but not installed. Please install Python 3 and try again.",
+        ));
+    }
+    Ok(())
+}
+
+pub fn ensure_prerequisites() -> io::Result<()> {
+    ensure_buck2_installed()?;
+    ensure_python3_installed()?;
+    Ok(())
 }

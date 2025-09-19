@@ -1,24 +1,28 @@
 use clap::Parser;
 
 use crate::{
+    buckal_error,
     buckify::flush_root,
     cache::BuckalCache,
     context::BuckalContext,
-    utils::{check_buck2_package, ensure_buck2_installed},
+    utils::{check_buck2_package, ensure_prerequisites},
 };
 
 #[derive(Parser, Debug)]
 pub struct MigrateArgs {}
 
 pub fn execute(_args: &MigrateArgs) {
-    // Ensure Buck2 is installed before proceeding
-    if let Err(e) = ensure_buck2_installed() {
-        eprintln!("Error: {}", e);
+    // Ensure all prerequisites are installed before proceeding
+    if let Err(e) = ensure_prerequisites() {
+        buckal_error!(e);
         std::process::exit(1);
     }
 
     // Check if the current directory is a valid Buck2 package
-    check_buck2_package();
+    if let Err(e) = check_buck2_package() {
+        buckal_error!(e);
+        std::process::exit(1);
+    }
 
     // get cargo metadata and generate context
     let ctx = BuckalContext::new();

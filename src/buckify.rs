@@ -8,7 +8,6 @@ use std::{
 use cargo_metadata::{
     DepKindInfo, DependencyKind, Node, Package, PackageId, Target, camino::Utf8PathBuf,
 };
-use colored::Colorize;
 use fs_extra::dir::{CopyOptions, copy};
 use itertools::Itertools;
 use regex::Regex;
@@ -587,7 +586,7 @@ impl BuckalChange {
                             if let ChangeType::Added = change_type {
                                 "Adding"
                             } else {
-                                "Updating"
+                                "Flushing"
                             },
                             format!("{} v{}", package.name, package.version)
                         );
