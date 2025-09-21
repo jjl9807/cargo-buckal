@@ -38,7 +38,6 @@ pub fn execute(args: &NewArgs) {
             .unwrap_or_exit_ctx("failed to create third-party directory");
         let mut git_ignore = OpenOptions::new()
             .create(false)
-            .write(true)
             .append(true)
             .open(format!("{}/.gitignore", args.path))
             .unwrap_or_exit_ctx("failed to open `.gitignore` file");
