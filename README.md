@@ -7,7 +7,7 @@ Seamlessly build Cargo packages with Buck2.
 ## Install
 
 ```
-cargo install --git https://github.com/r2cn-dev/cargo-buckal.git
+cargo install --git https://github.com/buck2hub/cargo-buckal.git
 ```
 
 ## Usage
