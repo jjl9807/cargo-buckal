@@ -2,7 +2,11 @@ use std::{fs::OpenOptions, io::Write, process::Command};
 
 use clap::Parser;
 
-use crate::{RUST_CRATES_ROOT, buck2::Buck2Command, buckal_error, utils::ensure_prerequisites};
+use crate::{
+    RUST_CRATES_ROOT,
+    buck2::Buck2Command,
+    utils::{UnwrapOrExit, ensure_prerequisites},
+};
 
 #[derive(Parser, Debug)]
 pub struct NewArgs {
@@ -21,26 +25,24 @@ pub struct NewArgs {
 
 pub fn execute(args: &NewArgs) {
     // Ensure all prerequisites are installed before proceeding
-    if let Err(e) = ensure_prerequisites() {
-        buckal_error!(e);
-        std::process::exit(1);
-    }
+    ensure_prerequisites().unwrap_or_exit();
 
     if args.root {
         // Init a new buck2 repo
-        if let Err(e) = Buck2Command::init().arg(&args.path).arg("--git").execute() {
-            buckal_error!(format!("failed to execute buck2 init:\n  {}", e));
-            std::process::exit(1);
-        }
+        Buck2Command::init()
+            .arg(&args.path)
+            .arg("--git")
+            .execute()
+            .unwrap_or_exit();
         std::fs::create_dir_all(format!("{}/{}", args.path, RUST_CRATES_ROOT))
-            .expect("Failed to create directory");
+            .unwrap_or_exit_ctx("failed to create third-party directory");
         let mut git_ignore = OpenOptions::new()
             .create(false)
             .write(true)
             .append(true)
             .open(format!("{}/.gitignore", args.path))
-            .expect("Failed to open .gitignore file");
-        writeln!(git_ignore, "/.buckal").expect("Failed to write to .gitignore file");
+            .unwrap_or_exit_ctx("failed to open `.gitignore` file");
+        writeln!(git_ignore, "/.buckal").unwrap_or_exit_ctx("failed to write to `.gitignore` file");
     } else {
         // Create a new cargo package/buck2 cell
         let mut cargo_cmd = Command::new("cargo");
@@ -63,12 +65,14 @@ pub fn execute(args: &NewArgs) {
         }
 
         // execute the cargo command
-        let status = cargo_cmd.status().expect("Failed to execute command");
+        let status = cargo_cmd
+            .status()
+            .unwrap_or_exit_ctx("failed to execute `cargo new`");
         if !status.success() {
             return;
         }
 
         let _buck = std::fs::File::create(format!("{}/BUCK", args.path))
-            .expect("Failed to create BUCK file");
+            .unwrap_or_exit_ctx("failed to create `BUCK` file");
     }
 }

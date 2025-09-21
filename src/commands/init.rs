@@ -2,7 +2,11 @@ use std::{fs::OpenOptions, io::Write, process::Command};
 
 use clap::Parser;
 
-use crate::{RUST_CRATES_ROOT, buck2::Buck2Command, buckal_error, utils::ensure_prerequisites};
+use crate::{
+    RUST_CRATES_ROOT,
+    buck2::Buck2Command,
+    utils::{UnwrapOrExit, ensure_prerequisites},
+};
 
 #[derive(Parser, Debug)]
 pub struct InitArgs {
@@ -20,23 +24,18 @@ pub struct InitArgs {
 
 pub fn execute(args: &InitArgs) {
     // Ensure all prerequisites are installed before proceeding
-    if let Err(e) = ensure_prerequisites() {
-        buckal_error!(e);
-        std::process::exit(1);
-    }
+    ensure_prerequisites().unwrap_or_exit();
 
     if args.root {
-        if let Err(e) = Buck2Command::init().arg("--git").execute() {
-            buckal_error!(format!("failed to execute buck2 init:\n  {}", e));
-            std::process::exit(1);
-        }
-        std::fs::create_dir_all(RUST_CRATES_ROOT).expect("Failed to create directory");
+        Buck2Command::init().arg("--git").execute().unwrap_or_exit();
+        std::fs::create_dir_all(RUST_CRATES_ROOT)
+            .unwrap_or_exit_ctx("failed to create third-party directory");
         let mut git_ignore = OpenOptions::new()
             .create(false)
             .append(true)
             .open(".gitignore")
-            .expect("Failed to open .gitignore file");
-        writeln!(git_ignore, "/.buckal").expect("Failed to write to .gitignore file");
+            .unwrap_or_exit_ctx("failed to open `.gitignore` file");
+        writeln!(git_ignore, "/.buckal").unwrap_or_exit_ctx("failed to write to `.gitignore` file");
     } else {
         let mut cargo_cmd = Command::new("cargo");
         cargo_cmd
@@ -57,11 +56,14 @@ pub fn execute(args: &InitArgs) {
         }
 
         // execute the cargo command
-        let status = cargo_cmd.status().expect("Failed to execute command");
+        let status = cargo_cmd
+            .status()
+            .unwrap_or_exit_ctx("failed to execute `cargo init`");
         if !status.success() {
             return;
         }
 
-        let _buck = std::fs::File::create("BUCK").expect("Failed to create BUCK file");
+        let _buck =
+            std::fs::File::create("BUCK").unwrap_or_exit_ctx("failed to create `BUCK` file");
     }
 }

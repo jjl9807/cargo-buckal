@@ -1,11 +1,9 @@
-use std::path::PathBuf;
-
 use clap::Parser;
 
 use crate::{
     buck2::Buck2Command,
     buckal_error,
-    utils::{check_buck2_package, ensure_prerequisites, get_buck2_root},
+    utils::{UnwrapOrExit, check_buck2_package, ensure_prerequisites, get_buck2_root},
 };
 
 #[derive(Parser, Debug)]
@@ -17,24 +15,14 @@ pub struct BuildArgs {
 
 pub fn execute(args: &BuildArgs) {
     // Ensure all prerequisites are installed before proceeding
-    if let Err(e) = ensure_prerequisites() {
-        buckal_error!(e);
-        std::process::exit(1);
-    }
+    ensure_prerequisites().unwrap_or_exit();
 
     // Check if the current directory is a valid Buck2 package
-    if let Err(e) = check_buck2_package() {
-        buckal_error!(e);
-        std::process::exit(1);
-    }
+    check_buck2_package().unwrap_or_exit();
 
     // Get the root directory of the Buck2 project
-    let buck2_root = get_buck2_root();
-    if buck2_root.is_empty() {
-        return;
-    }
-    let buck2_root = PathBuf::from(buck2_root.trim());
-    let cwd = std::env::current_dir().expect("Failed to get current directory");
+    let buck2_root = get_buck2_root().unwrap_or_exit_ctx("failed to get Buck2 project root");
+    let cwd = std::env::current_dir().unwrap_or_exit_ctx("failed to get current directory");
     let relative = cwd.strip_prefix(&buck2_root).ok();
 
     if relative.is_none() {

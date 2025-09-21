@@ -3,11 +3,10 @@ use std::process::{Command, Stdio};
 use clap::Parser;
 
 use crate::{
-    buckal_error,
     buckify::flush_root,
     cache::BuckalCache,
     context::BuckalContext,
-    utils::{check_buck2_package, ensure_prerequisites, get_last_cache, section},
+    utils::{UnwrapOrExit, check_buck2_package, ensure_prerequisites, get_last_cache, section},
 };
 
 #[derive(Parser, Debug)]
@@ -25,16 +24,10 @@ pub struct AddArgs {
 
 pub fn execute(args: &AddArgs) {
     // Ensure all prerequisites are installed before proceeding
-    if let Err(e) = ensure_prerequisites() {
-        buckal_error!(e);
-        std::process::exit(1);
-    }
+    ensure_prerequisites().unwrap_or_exit();
 
     // Check if the current directory is a valid Buck2 package
-    if let Err(e) = check_buck2_package() {
-        buckal_error!(e);
-        std::process::exit(1);
-    }
+    check_buck2_package().unwrap_or_exit();
 
     // get last cache
     let last_cache = get_last_cache();
@@ -60,7 +53,9 @@ pub fn execute(args: &AddArgs) {
     }
 
     // execute the cargo command
-    let status = cargo_cmd.status().expect("Failed to execute command");
+    let status = cargo_cmd
+        .status()
+        .unwrap_or_exit_ctx("failed to execute `cargo add`");
     if !status.success() {
         return;
     }
