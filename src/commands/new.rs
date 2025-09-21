@@ -1,45 +1,77 @@
-use std::{
-    fs::OpenOptions,
-    io::Write,
-    process::{Command, Stdio},
-};
+use std::{fs::OpenOptions, io::Write, process::Command};
 
 use clap::Parser;
 
-use crate::{RUST_CRATES_ROOT, buck2::Buck2Command, utils::ensure_buck2_installed};
+use crate::{
+    RUST_CRATES_ROOT,
+    buck2::Buck2Command,
+    utils::{UnwrapOrExit, ensure_prerequisites},
+};
 
 #[derive(Parser, Debug)]
 pub struct NewArgs {
     pub path: String,
+    #[arg(long, default_value = "false")]
+    pub bin: bool,
+    #[arg(long, default_value = "false")]
+    pub lib: bool,
+    #[arg(long)]
+    pub edition: Option<String>,
+    #[arg(long)]
+    pub name: Option<String>,
+    #[arg(long, default_value = "false", conflicts_with_all = ["bin", "lib", "edition", "name"])]
+    pub root: bool,
 }
 
 pub fn execute(args: &NewArgs) {
-    // Ensure Buck2 is installed before proceeding
-    if let Err(e) = ensure_buck2_installed() {
-        eprintln!("Error: {}", e);
-        std::process::exit(1);
+    // Ensure all prerequisites are installed before proceeding
+    ensure_prerequisites().unwrap_or_exit();
+
+    if args.root {
+        // Init a new buck2 repo
+        Buck2Command::init()
+            .arg(&args.path)
+            .arg("--git")
+            .execute()
+            .unwrap_or_exit();
+        std::fs::create_dir_all(format!("{}/{}", args.path, RUST_CRATES_ROOT))
+            .unwrap_or_exit_ctx("failed to create third-party directory");
+        let mut git_ignore = OpenOptions::new()
+            .create(false)
+            .append(true)
+            .open(format!("{}/.gitignore", args.path))
+            .unwrap_or_exit_ctx("failed to open `.gitignore` file");
+        writeln!(git_ignore, "/.buckal").unwrap_or_exit_ctx("failed to write to `.gitignore` file");
+    } else {
+        // Create a new cargo package/buck2 cell
+        let mut cargo_cmd = Command::new("cargo");
+        cargo_cmd
+            .arg("new")
+            .arg(&args.path)
+            .stdout(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::inherit());
+        if args.bin {
+            cargo_cmd.arg("--bin");
+        }
+        if args.lib {
+            cargo_cmd.arg("--lib");
+        }
+        if let Some(edition) = &args.edition {
+            cargo_cmd.arg("--edition").arg(edition);
+        }
+        if let Some(name) = &args.name {
+            cargo_cmd.arg("--name").arg(name);
+        }
+
+        // execute the cargo command
+        let status = cargo_cmd
+            .status()
+            .unwrap_or_exit_ctx("failed to execute `cargo new`");
+        if !status.success() {
+            return;
+        }
+
+        let _buck = std::fs::File::create(format!("{}/BUCK", args.path))
+            .unwrap_or_exit_ctx("failed to create `BUCK` file");
     }
-
-    let _status = Command::new("cargo")
-        .arg("new")
-        .arg(&args.path)
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .status()
-        .expect("Failed to execute command");
-
-    if let Err(e) = Buck2Command::init().arg(&args.path).execute() {
-        eprintln!("Failed to execute buck2 init: {}", e);
-        std::process::exit(1);
-    }
-    std::fs::create_dir_all(format!("{}/{}", args.path, RUST_CRATES_ROOT))
-        .expect("Failed to create directory");
-
-    let mut git_ignore = OpenOptions::new()
-        .create(false)
-        .write(true)
-        .append(true)
-        .open(format!("{}/.gitignore", args.path))
-        .expect("Failed to open .gitignore file");
-    writeln!(git_ignore, "/buck-out").expect("Failed to write to .gitignore file");
 }

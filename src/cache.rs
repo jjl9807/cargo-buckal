@@ -5,7 +5,7 @@ use blake3::hash;
 use cargo_metadata::{Node, PackageId};
 use serde::{Deserialize, Serialize};
 
-use crate::utils::{get_cache_dir, get_cache_path};
+use crate::utils::{UnwrapOrExit, get_cache_dir, get_cache_path};
 
 type Fingerprint = [u8; 32];
 
@@ -40,7 +40,7 @@ impl BuckalCache {
     }
 
     pub fn load() -> Self {
-        let cache_path = get_cache_path();
+        let cache_path = get_cache_path().unwrap_or_exit_ctx("failed to get cache path");
         if !cache_path.exists() {
             return Self {
                 fingerprints: HashMap::new(),
@@ -60,8 +60,8 @@ impl BuckalCache {
     }
 
     pub fn save(&self) {
-        let cache_path = get_cache_path();
-        let cache_dir = get_cache_dir();
+        let cache_path = get_cache_path().unwrap_or_exit_ctx("failed to get cache path");
+        let cache_dir = get_cache_dir().unwrap_or_exit_ctx("failed to get cache directory");
         if !cache_dir.exists() {
             std::fs::create_dir_all(&cache_dir).expect("Failed to create cache directory");
         }

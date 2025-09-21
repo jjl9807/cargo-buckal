@@ -6,7 +6,7 @@ use crate::{
     buckify::flush_root,
     cache::BuckalCache,
     context::BuckalContext,
-    utils::{check_buck2_package, ensure_buck2_installed, get_last_cache, section},
+    utils::{UnwrapOrExit, check_buck2_package, ensure_prerequisites, get_last_cache, section},
 };
 
 #[derive(Parser, Debug)]
@@ -18,14 +18,11 @@ pub struct UpdateArgs {
 }
 
 pub fn execute(args: &UpdateArgs) {
-    // Ensure Buck2 is installed before proceeding
-    if let Err(e) = ensure_buck2_installed() {
-        eprintln!("Error: {}", e);
-        std::process::exit(1);
-    }
+    // Ensure all prerequisites are installed before proceeding
+    ensure_prerequisites().unwrap_or_exit();
 
     // Check if the current directory is a valid Buck2 package
-    check_buck2_package();
+    check_buck2_package().unwrap_or_exit();
 
     // get last cache
     let last_cache = get_last_cache();
@@ -41,12 +38,14 @@ pub fn execute(args: &UpdateArgs) {
     }
 
     // execute the cargo command
-    let status = cargo_cmd.status().expect("Failed to execute command");
+    let status = cargo_cmd
+        .status()
+        .unwrap_or_exit_ctx("failed to execute `cargo update`");
     if !status.success() {
         return;
     }
 
-    section("Buckal Changelog");
+    section("Buckal Console");
 
     // get cargo metadata and generate context
     let ctx = BuckalContext::new();

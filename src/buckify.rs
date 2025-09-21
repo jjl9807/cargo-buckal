@@ -8,7 +8,6 @@ use std::{
 use cargo_metadata::{
     DepKindInfo, DependencyKind, Node, Package, PackageId, Target, camino::Utf8PathBuf,
 };
-use colored::Colorize;
 use fs_extra::dir::{CopyOptions, copy};
 use itertools::Itertools;
 use regex::Regex;
@@ -24,7 +23,7 @@ use crate::{
     buckal_log,
     cache::{BuckalChange, ChangeType},
     context::BuckalContext,
-    utils::{get_buck2_root, get_cfgs, get_target, get_vendor_dir},
+    utils::{UnwrapOrExit, get_buck2_root, get_cfgs, get_target, get_vendor_dir},
 };
 
 pub fn buckify_dep_node(node: &Node, packages_map: &HashMap<PackageId, Package>) -> Vec<Rule> {
@@ -204,9 +203,10 @@ pub fn vendor_package(package: &Package) -> Utf8PathBuf {
     // Vendor the package sources to `third-party/rust/crates/<package_name>/<version>`
     let manifest_path = package.manifest_path.clone();
     let src_path = manifest_path.parent().unwrap().to_owned();
-    let target_path = get_vendor_dir(&package.name, &package.version.to_string());
-    if !target_path.exists() {
-        std::fs::create_dir_all(&target_path).expect("Failed to create target directory");
+    let vendor_dir = get_vendor_dir(&package.name, &package.version.to_string())
+        .unwrap_or_exit_ctx("failed to get vendor directory");
+    if !vendor_dir.exists() {
+        std::fs::create_dir_all(&vendor_dir).expect("Failed to create target directory");
     }
     let copy_options = CopyOptions {
         skip_exist: false,
@@ -214,9 +214,9 @@ pub fn vendor_package(package: &Package) -> Utf8PathBuf {
         content_only: true,
         ..Default::default()
     };
-    copy(&src_path, &target_path, &copy_options).expect("Failed to copy package sources");
+    copy(&src_path, &vendor_dir, &copy_options).expect("Failed to copy package sources");
 
-    target_path
+    vendor_dir
 }
 
 pub fn gen_cargo_env(package: &Package) -> Map<String, String> {
@@ -318,11 +318,8 @@ fn set_deps(
                 // Normal dependencies and build dependencies for `build.rs` on current arch
                 if dep_package.source.is_none() {
                     // first-party dependency
-                    let buck2_root = get_buck2_root();
-                    if buck2_root.is_empty() {
-                        return;
-                    }
-                    let buck2_root = PathBuf::from(buck2_root.trim());
+                    let buck2_root =
+                        get_buck2_root().unwrap_or_exit_ctx("failed to get buck2 root");
                     let manifest_path = PathBuf::from(&dep_package.manifest_path);
                     let manifest_dir = manifest_path.parent().unwrap();
                     let relative = manifest_dir.strip_prefix(&buck2_root).ok();
@@ -587,7 +584,7 @@ impl BuckalChange {
                             if let ChangeType::Added = change_type {
                                 "Adding"
                             } else {
-                                "Updating"
+                                "Flushing"
                             },
                             format!("{} v{}", package.name, package.version)
                         );
@@ -620,12 +617,14 @@ impl BuckalChange {
                     let version = &caps[4];
 
                     buckal_log!("Removing", format!("{} v{}", name, version));
-                    let vendor_dir = get_vendor_dir(name, version);
+                    let vendor_dir = get_vendor_dir(name, version)
+                        .unwrap_or_exit_ctx("failed to get vendor directory");
                     if vendor_dir.exists() {
                         std::fs::remove_dir_all(&vendor_dir)
                             .expect("Failed to remove vendor directory");
                     }
                     if let Some(package_dir) = vendor_dir.parent()
+                        && package_dir.exists()
                         && package_dir.read_dir().unwrap().next().is_none()
                     {
                         std::fs::remove_dir_all(package_dir)

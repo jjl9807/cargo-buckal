@@ -1,10 +1,9 @@
-use std::path::PathBuf;
-
 use clap::Parser;
 
 use crate::{
     buck2::Buck2Command,
-    utils::{ensure_buck2_installed, get_buck2_root},
+    buckal_error,
+    utils::{UnwrapOrExit, check_buck2_package, ensure_prerequisites, get_buck2_root},
 };
 
 #[derive(Parser, Debug)]
@@ -15,23 +14,19 @@ pub struct BuildArgs {
 }
 
 pub fn execute(args: &BuildArgs) {
-    // Ensure Buck2 is installed before proceeding
-    if let Err(e) = ensure_buck2_installed() {
-        eprintln!("Error: {}", e);
-        std::process::exit(1);
-    }
+    // Ensure all prerequisites are installed before proceeding
+    ensure_prerequisites().unwrap_or_exit();
+
+    // Check if the current directory is a valid Buck2 package
+    check_buck2_package().unwrap_or_exit();
 
     // Get the root directory of the Buck2 project
-    let buck2_root = get_buck2_root();
-    if buck2_root.is_empty() {
-        return;
-    }
-    let buck2_root = PathBuf::from(buck2_root.trim());
-    let cwd = std::env::current_dir().expect("Failed to get current directory");
+    let buck2_root = get_buck2_root().unwrap_or_exit_ctx("failed to get Buck2 project root");
+    let cwd = std::env::current_dir().unwrap_or_exit_ctx("failed to get current directory");
     let relative = cwd.strip_prefix(&buck2_root).ok();
 
     if relative.is_none() {
-        eprintln!("error: Current directory is not inside the Buck2 project root.");
+        buckal_error!("current directory is not inside the Buck2 project root");
         return;
     }
     let mut relative_path = relative.unwrap().to_string_lossy().into_owned();
@@ -41,7 +36,7 @@ pub fn execute(args: &BuildArgs) {
     }
 
     if args.verbose > 2 {
-        eprintln!("error: Maximum verbosity!");
+        buckal_error!("maximum verbosity");
         return;
     }
 
@@ -53,11 +48,11 @@ pub fn execute(args: &BuildArgs) {
     match result {
         Ok(status) if status.success() => {}
         Ok(_) => {
-            eprintln!("Buck2 build failed");
+            buckal_error!("buck2 build failed");
             std::process::exit(1);
         }
         Err(e) => {
-            eprintln!("Failed to execute buck2 build: {}", e);
+            buckal_error!(format!("failed to execute buck2 build:\n  {}", e));
             std::process::exit(1);
         }
     }

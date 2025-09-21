@@ -15,12 +15,29 @@ use crate::cache::BuckalCache;
 macro_rules! buckal_log {
     ($action:expr, $msg:expr) => {{
         let colored = match $action {
-            "Adding" => $action.cyan().bold(),
-            "Flushing" => $action.green().bold(),
-            "Removing" => $action.red().bold(),
-            _ => $action.bold(),
+            "Adding" => ::colored::Colorize::cyan($action),
+            "Flushing" => ::colored::Colorize::green($action),
+            "Removing" => ::colored::Colorize::yellow($action),
+            _ => ::colored::Colorize::blue($action),
         };
-        println!("{:>12} {}", colored, $msg);
+        println!("{:>12} {}", ::colored::Colorize::bold(colored), $msg);
+    }};
+}
+
+#[macro_export]
+macro_rules! buckal_error {
+    ($msg:expr) => {{
+        let error_prefix = ::colored::Colorize::red("error:");
+        eprintln!("{} {}", ::colored::Colorize::bold(error_prefix), $msg);
+    }};
+
+    ($fmt:expr, $($arg:tt)*) => {{
+        let error_prefix = ::colored::Colorize::red("error:");
+        eprintln!(
+            "{} {}",
+            ::colored::Colorize::bold(error_prefix),
+            format_args!($fmt, $($arg)*)
+        );
     }};
 }
 
@@ -254,32 +271,30 @@ pub fn ensure_buck2_installed() -> io::Result<()> {
     Ok(())
 }
 
-pub fn get_buck2_root() -> String {
+pub fn get_buck2_root() -> io::Result<Utf8PathBuf> {
     // This function should return the root directory of the Buck2 project.
-    match Buck2Command::root().output() {
-        Ok(output) if output.status.success() => {
-            String::from_utf8_lossy(&output.stdout).trim().to_string()
-        }
-        Ok(output) => {
-            eprintln!("{}", String::from_utf8_lossy(&output.stderr));
-            String::new()
-        }
-        Err(e) => {
-            eprintln!("Failed to execute buck2 command: {}", e);
-            String::new()
-        }
+    let out_put = Buck2Command::root().output()?;
+    if out_put.status.success() {
+        let path_str = String::from_utf8_lossy(&out_put.stdout).trim().to_string();
+        Ok(Utf8PathBuf::from(path_str))
+    } else {
+        Err(io::Error::other(
+            String::from_utf8_lossy(&out_put.stderr).to_string(),
+        ))
     }
 }
 
-pub fn check_buck2_package() {
+pub fn check_buck2_package() -> io::Result<()> {
     // This function checks if the current directory is a valid Buck2 package.
     let cwd = std::env::current_dir().expect("Failed to get current directory");
     let buck_file = cwd.join("BUCK");
-    assert!(
-        buck_file.exists(),
-        "{}",
-        format!("error: could not find `BUCK` in `{}`", cwd.display())
-    );
+    if !buck_file.exists() {
+        return Err(io::Error::other(format!(
+            "could not find `BUCK` in `{}`. Are you in a Buck2 package?",
+            cwd.display(),
+        )));
+    }
+    Ok(())
 }
 
 pub fn get_target() -> String {
@@ -308,24 +323,24 @@ pub fn get_cfgs() -> Vec<Cfg> {
         .collect()
 }
 
-pub fn get_cache_dir() -> Utf8PathBuf {
-    Utf8PathBuf::from(get_buck2_root()).join(".buckal")
+pub fn get_cache_dir() -> io::Result<Utf8PathBuf> {
+    Ok(get_buck2_root()?.join(".buckal"))
 }
 
-pub fn get_cache_path() -> Utf8PathBuf {
-    get_cache_dir().join("cache")
+pub fn get_cache_path() -> io::Result<Utf8PathBuf> {
+    Ok(get_cache_dir()?.join("cache"))
 }
 
-pub fn get_vendor_dir(name: &str, version: &str) -> Utf8PathBuf {
-    Utf8PathBuf::from(get_buck2_root()).join(format!("{RUST_CRATES_ROOT}/{}/{}", name, version))
+pub fn get_vendor_dir(name: &str, version: &str) -> io::Result<Utf8PathBuf> {
+    Ok(get_buck2_root()?.join(format!("{RUST_CRATES_ROOT}/{}/{}", name, version)))
 }
 
 pub fn get_last_cache() -> BuckalCache {
     // This function retrieves the last saved BuckalCache from the cache file.
     // If the cache file does not exist, it returns a snapshot of the current state.
-    let cache_path = get_cache_path();
+    let cache_path = get_cache_path().unwrap_or_exit_ctx("failed to get cache path");
     if !cache_path.exists() {
-        let cargo_metadata = MetadataCommand::new().exec().unwrap();
+        let cargo_metadata = MetadataCommand::new().exec().unwrap_or_exit();
         let resolve = cargo_metadata.resolve.unwrap();
         let nodes_map = resolve
             .nodes
@@ -355,4 +370,54 @@ pub fn section(title: &str) {
     let right_pad = "-".repeat(right_padding);
 
     println!("{}{}{}", left_pad, content, right_pad);
+}
+
+pub fn check_python3_installed() -> bool {
+    Command::new("python3")
+        .arg("--version")
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+pub fn ensure_python3_installed() -> io::Result<()> {
+    if !check_python3_installed() {
+        return Err(io::Error::other(
+            "Python 3 is required but not installed. Please install Python 3 and try again.",
+        ));
+    }
+    Ok(())
+}
+
+pub fn ensure_prerequisites() -> io::Result<()> {
+    ensure_buck2_installed()?;
+    ensure_python3_installed()?;
+    Ok(())
+}
+
+pub trait UnwrapOrExit<T> {
+    fn unwrap_or_exit(self) -> T;
+    fn unwrap_or_exit_ctx(self, context: impl std::fmt::Display) -> T;
+}
+
+impl<T, E: std::fmt::Display> UnwrapOrExit<T> for Result<T, E> {
+    fn unwrap_or_exit(self) -> T {
+        match self {
+            Ok(value) => value,
+            Err(error) => {
+                buckal_error!(error);
+                std::process::exit(1);
+            }
+        }
+    }
+
+    fn unwrap_or_exit_ctx(self, context: impl std::fmt::Display) -> T {
+        match self {
+            Ok(value) => value,
+            Err(error) => {
+                buckal_error!("{}:\n{}", context, error);
+                std::process::exit(1);
+            }
+        }
+    }
 }
