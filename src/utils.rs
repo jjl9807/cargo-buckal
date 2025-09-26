@@ -338,8 +338,9 @@ pub fn get_vendor_dir(name: &str, version: &str) -> io::Result<Utf8PathBuf> {
 pub fn get_last_cache() -> BuckalCache {
     // This function retrieves the last saved BuckalCache from the cache file.
     // If the cache file does not exist, it returns a snapshot of the current state.
-    let cache_path = get_cache_path().unwrap_or_exit_ctx("failed to get cache path");
-    if !cache_path.exists() {
+    if let Ok(last_cache) = BuckalCache::load() {
+        last_cache
+    } else {
         let cargo_metadata = MetadataCommand::new().exec().unwrap_or_exit();
         let resolve = cargo_metadata.resolve.unwrap();
         let nodes_map = resolve
@@ -348,8 +349,6 @@ pub fn get_last_cache() -> BuckalCache {
             .map(|n| (n.id.to_owned(), n))
             .collect::<HashMap<_, _>>();
         BuckalCache::new(&nodes_map)
-    } else {
-        BuckalCache::load()
     }
 }
 

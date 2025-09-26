@@ -575,11 +575,6 @@ impl BuckalChange {
                     if let Some(node) = ctx.nodes_map.get(id) {
                         let package = ctx.packages_map.get(id).unwrap();
 
-                        // Skip local packages
-                        if package.source.is_none() {
-                            continue;
-                        }
-
                         buckal_log!(
                             if let ChangeType::Added = change_type {
                                 "Adding"
@@ -590,10 +585,19 @@ impl BuckalChange {
                         );
 
                         // Vendor package sources
-                        let vendor_path = vendor_package(package);
+                        let vendor_path = if package.source.is_none() {
+                            package.manifest_path.parent().unwrap().to_owned()
+                        } else {
+                            vendor_package(package)
+                        };
 
                         // Generate BUCK rules
-                        let mut buck_rules = buckify_dep_node(node, &ctx.packages_map);
+                        let mut buck_rules = if package.source.is_none() {
+                            buckify_root_node(node, &ctx.packages_map)
+                        } else {
+                            buckify_dep_node(node, &ctx.packages_map)
+                        };
+                            
 
                         // Patch BUCK Rules
                         let buck_path = vendor_path.join("BUCK");
