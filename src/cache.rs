@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 
+use anyhow::{Result, Error, anyhow};
 use bincode::config::Configuration;
 use blake3::hash;
 use cargo_metadata::{Node, PackageId};
@@ -39,13 +40,17 @@ impl BuckalCache {
         }
     }
 
-    pub fn load() -> Self {
+    pub fn new_empty() -> Self {
+        Self {
+            fingerprints: HashMap::new(),
+            version: 1,
+        }
+    }
+
+    pub fn load() -> Result<Self, Error> {
         let cache_path = get_cache_path().unwrap_or_exit_ctx("failed to get cache path");
         if !cache_path.exists() {
-            return Self {
-                fingerprints: HashMap::new(),
-                version: 1,
-            };
+            return Err(anyhow!("Cache file does not exist"));
         }
         if let Ok(mut cache_reader) = std::fs::File::open(&cache_path)
             && let Ok(cache) = bincode::serde::decode_from_std_read::<
@@ -54,9 +59,9 @@ impl BuckalCache {
                 std::fs::File,
             >(&mut cache_reader, bincode::config::standard())
         {
-            return cache;
+            return Ok(cache);
         }
-        panic!("Failed to load cache or version mismatch");
+        Err(anyhow!("Cache version mismatch"))
     }
 
     pub fn save(&self) {
