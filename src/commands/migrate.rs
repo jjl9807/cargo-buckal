@@ -11,6 +11,8 @@ use crate::{
 pub struct MigrateArgs {
     #[clap(long, name = "override")]
     pub _override: bool,
+    #[clap(long)]
+    pub separate: bool,
 }
 
 pub fn execute(args: &MigrateArgs) {
@@ -36,7 +38,7 @@ pub fn execute(args: &MigrateArgs) {
     let changes = new_cache.diff(&last_cache);
 
     // Apply changes to BUCK files
-    changes.apply(&ctx);
+    changes.apply(&ctx, args.separate);
 
     // Flush the new cache
     new_cache.save();

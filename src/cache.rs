@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 
-use anyhow::{Result, Error, anyhow};
+use anyhow::{Error, Result, anyhow};
 use bincode::config::Configuration;
 use blake3::hash;
 use cargo_metadata::{Node, PackageId};
