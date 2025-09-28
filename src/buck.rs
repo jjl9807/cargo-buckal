@@ -11,6 +11,8 @@ use std::ffi::CString;
 #[serde(untagged)]
 pub enum Rule {
     Load(Load),
+    HttpArchive(HttpArchive),
+    FileGroup(FileGroup),
     CargoRustLibrary(CargoRustLibrary),
     CargoRustBinary(CargoRustBinary),
     BuildscriptRun(BuildscriptRun),
@@ -40,10 +42,23 @@ pub struct Load {
 }
 
 #[derive(Serialize, Default, Debug)]
+#[serde(rename = "http_archive")]
+pub struct HttpArchive {
+    pub name: String,
+    pub urls: Set<String>,
+    pub sha256: String,
+    #[serde(rename = "type")]
+    pub _type: String,
+    pub strip_prefix: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub out: Option<String>,
+}
+
+#[derive(Serialize, Default, Debug)]
 #[serde(rename = "cargo.rust_library")]
 pub struct CargoRustLibrary {
     pub name: String,
-    pub srcs: Glob,
+    pub srcs: Set<String>,
     #[serde(rename = "crate")]
     pub crate_name: String,
     pub crate_root: String,
@@ -67,7 +82,7 @@ pub struct CargoRustLibrary {
 #[serde(rename = "cargo.rust_binary")]
 pub struct CargoRustBinary {
     pub name: String,
-    pub srcs: Glob,
+    pub srcs: Set<String>,
     #[serde(rename = "crate")]
     pub crate_name: String,
     pub crate_root: String,
@@ -96,7 +111,7 @@ pub struct BuildscriptRun {
     #[serde(skip_serializing_if = "Set::is_empty")]
     pub features: Set<String>,
     pub version: String,
-    pub local_manifest_dir: String,
+    pub manifest_dir: String,
     #[serde(skip_serializing_if = "Set::is_empty")]
     pub visibility: Set<String>,
 }
@@ -105,6 +120,15 @@ pub struct BuildscriptRun {
 pub struct Glob {
     pub include: Set<String>,
     pub exclude: Set<String>,
+}
+
+#[derive(Serialize, Default, Debug)]
+#[serde(rename = "filegroup")]
+pub struct FileGroup {
+    pub name: String,
+    pub srcs: Glob,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub out: Option<String>,
 }
 
 impl Serialize for Load {
@@ -138,29 +162,45 @@ impl Serialize for Glob {
 }
 
 impl Glob {
-    fn from_py_dict(kwargs: &Bound<'_, PyDict>) -> PyResult<Self> {
-        let include_vec: Vec<String> = kwargs
-            .get_item("include")
-            .expect("Expected 'include' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
-        let include: Set<String> = include_vec.into_iter().collect();
-        let exclude_vec: Vec<String> = kwargs
-            .get_item("exclude")
-            .expect("Expected 'exclude' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
-        let exclude: Set<String> = exclude_vec.into_iter().collect();
-        Ok(Glob { include, exclude })
-    }
-
-    fn patch_from(&mut self, other: &Glob) {
-        // Patch include set
-        let to_add: Vec<_> = other.include.difference(&self.include).cloned().collect();
-        self.include.extend(to_add);
-        // Patch exclude set
-        let to_add: Vec<_> = other.exclude.difference(&self.exclude).cloned().collect();
-        self.exclude.extend(to_add);
+    fn from_py_tuple(tuple: &Bound<'_, PyTuple>) -> PyResult<Self> {
+        let func_binding = tuple.get_item(0).unwrap();
+        let func = func_binding.downcast::<PyString>().unwrap();
+        assert_eq!(func.to_str().unwrap(), "glob");
+        let args_binding = tuple.get_item(1).unwrap();
+        let args = args_binding.downcast::<PyTuple>().unwrap();
+        if args.len() > 1 {
+            Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "glob only supports one positional argument",
+            ))
+        } else if args.len() == 1 {
+            let include_vec: Vec<String> = args
+                .get_item(0)
+                .expect("Expected one positional argument")
+                .extract()
+                .ok()
+                .unwrap_or_default();
+            let include: Set<String> = include_vec.into_iter().collect();
+            Ok(Glob {
+                include,
+                exclude: Set::new(),
+            })
+        } else {
+            let kwargs_binding = tuple.get_item(2).unwrap();
+            let kwargs = kwargs_binding.downcast::<PyDict>().unwrap();
+            let include_vec: Vec<String> = kwargs
+                .get_item("include")
+                .expect("Expected 'include' argument")
+                .and_then(|v| v.extract().ok())
+                .unwrap_or_default();
+            let include: Set<String> = include_vec.into_iter().collect();
+            let exclude_vec: Vec<String> = kwargs
+                .get_item("exclude")
+                .expect("Expected 'exclude' argument")
+                .and_then(|v| v.extract().ok())
+                .unwrap_or_default();
+            let exclude: Set<String> = exclude_vec.into_iter().collect();
+            Ok(Glob { include, exclude })
+        }
     }
 }
 
@@ -207,17 +247,12 @@ impl CargoRustLibrary {
             .expect("Expected 'name' argument")
             .and_then(|v| v.extract().ok())
             .unwrap_or_default();
-        let src_kwargs_tuple_binding = kwargs
+        let srcs_vec: Vec<String> = kwargs
             .get_item("srcs")
             .expect("Expected 'srcs' argument")
-            .unwrap();
-        let src_kwargs_tuple = src_kwargs_tuple_binding.downcast::<PyTuple>().unwrap();
-        let src_func_binding = src_kwargs_tuple.get_item(0).unwrap();
-        let src_func = src_func_binding.downcast::<PyString>().unwrap();
-        let src_kwargs_binding = src_kwargs_tuple.get_item(1).unwrap();
-        let src_kwargs = src_kwargs_binding.downcast::<PyDict>().unwrap();
-        assert!(src_func.extract::<&str>().unwrap() == "glob");
-        let srcs = Glob::from_py_dict(src_kwargs)?;
+            .and_then(|v| v.extract().ok())
+            .unwrap_or_default();
+        let srcs: Set<String> = srcs_vec.into_iter().collect();
         let crate_name: String = kwargs
             .get_item("crate")
             .expect("Expected 'crate' argument")
@@ -289,8 +324,6 @@ impl CargoRustLibrary {
     }
 
     fn patch_from(&mut self, other: &CargoRustLibrary) {
-        // Patch srcs glob
-        self.srcs.patch_from(&other.srcs);
         // Patch env map
         for (k, v) in &other.env {
             self.env.entry(k.clone()).or_insert_with(|| v.clone());
@@ -322,17 +355,12 @@ impl CargoRustBinary {
             .expect("Expected 'name' argument")
             .and_then(|v| v.extract().ok())
             .unwrap_or_default();
-        let src_kwargs_tuple_binding = kwargs
+        let srcs_vec: Vec<String> = kwargs
             .get_item("srcs")
             .expect("Expected 'srcs' argument")
-            .unwrap();
-        let src_kwargs_tuple = src_kwargs_tuple_binding.downcast::<PyTuple>().unwrap();
-        let src_func_binding = src_kwargs_tuple.get_item(0).unwrap();
-        let src_func = src_func_binding.downcast::<PyString>().unwrap();
-        let src_kwargs_binding = src_kwargs_tuple.get_item(1).unwrap();
-        let src_kwargs = src_kwargs_binding.downcast::<PyDict>().unwrap();
-        assert!(src_func.extract::<&str>().unwrap() == "glob");
-        let srcs = Glob::from_py_dict(src_kwargs)?;
+            .and_then(|v| v.extract().ok())
+            .unwrap_or_default();
+        let srcs: Set<String> = srcs_vec.into_iter().collect();
         let crate_name: String = kwargs
             .get_item("crate")
             .expect("Expected 'crate' argument")
@@ -398,8 +426,6 @@ impl CargoRustBinary {
     }
 
     fn patch_from(&mut self, other: &CargoRustBinary) {
-        // Patch srcs glob
-        self.srcs.patch_from(&other.srcs);
         // Patch env map
         for (k, v) in &other.env {
             self.env.entry(k.clone()).or_insert_with(|| v.clone());
@@ -457,9 +483,9 @@ impl BuildscriptRun {
             .expect("Expected 'version' argument")
             .and_then(|v| v.extract().ok())
             .unwrap_or_default();
-        let local_manifest_dir: String = kwargs
-            .get_item("local_manifest_dir")
-            .expect("Expected 'local_manifest_dir' argument")
+        let manifest_dir: String = kwargs
+            .get_item("manifest_dir")
+            .expect("Expected 'manifest_dir' argument")
             .and_then(|v| v.extract().ok())
             .unwrap_or_default();
         let visibility_vec: Vec<String> = kwargs
@@ -475,7 +501,7 @@ impl BuildscriptRun {
             env,
             features,
             version,
-            local_manifest_dir,
+            manifest_dir,
             visibility,
         })
     }
@@ -495,6 +521,72 @@ impl BuildscriptRun {
             .cloned()
             .collect();
         self.visibility.extend(to_add);
+    }
+}
+
+impl HttpArchive {
+    fn from_py_dict(kwargs: &Bound<'_, PyDict>) -> PyResult<Self> {
+        let name: String = kwargs
+            .get_item("name")
+            .expect("Expected 'name' argument")
+            .and_then(|v| v.extract().ok())
+            .unwrap_or_default();
+        let urls_vec: Vec<String> = kwargs
+            .get_item("urls")
+            .expect("Expected 'urls' argument")
+            .and_then(|v| v.extract().ok())
+            .unwrap_or_default();
+        let urls: Set<String> = urls_vec.into_iter().collect();
+        let sha256: String = kwargs
+            .get_item("sha256")
+            .expect("Expected 'sha256' argument")
+            .and_then(|v| v.extract().ok())
+            .unwrap_or_default();
+        let _type: String = kwargs
+            .get_item("type")
+            .expect("Expected 'type' argument")
+            .and_then(|v| v.extract().ok())
+            .unwrap_or_default();
+        let strip_prefix: String = kwargs
+            .get_item("strip_prefix")
+            .expect("Expected 'strip_prefix' argument")
+            .and_then(|v| v.extract().ok())
+            .unwrap_or_default();
+        let out: Option<String> = kwargs
+            .get_item("out")
+            .expect("Expected 'out' argument")
+            .and_then(|v| v.extract().ok())
+            .unwrap_or_default();
+        Ok(HttpArchive {
+            name,
+            urls,
+            sha256,
+            _type,
+            strip_prefix,
+            out,
+        })
+    }
+}
+
+impl FileGroup {
+    fn from_py_dict(kwargs: &Bound<'_, PyDict>) -> PyResult<Self> {
+        let name: String = kwargs
+            .get_item("name")
+            .expect("Expected 'name' argument")
+            .and_then(|v| v.extract().ok())
+            .unwrap_or_default();
+        let srcs_tuple_binding = kwargs
+            .get_item("srcs")
+            .expect("Expected 'srcs' argument")
+            .unwrap();
+        let srcs_tuple = srcs_tuple_binding.downcast::<PyTuple>().unwrap();
+        let srcs = Glob::from_py_tuple(srcs_tuple)?;
+        let out: Option<String> = kwargs
+            .get_item("out")
+            .expect("Expected 'out' argument")
+            .and_then(|v| v.extract().ok())
+            .unwrap_or_default();
+        Ok(FileGroup { name, srcs, out })
     }
 }
 
@@ -525,8 +617,16 @@ def cargo_rust_binary(*args, **kwargs):
 def buildscript_run(*args, **kwargs):
     pass
 
+@buckal_call
+def http_archive(*args, **kwargs):
+    pass
+
+@buckal_call
+def filegroup(*args, **kwargs):
+    pass
+
 def glob(*args, **kwargs):
-    return (glob.__name__, kwargs)
+    return (glob.__name__, args, kwargs)
 
 def load(*args, **kwargs):
     pass
@@ -571,6 +671,14 @@ def load(*args, **kwargs):
                 "buildscript_run" => {
                     let rule = BuildscriptRun::from_py_dict(kwargs)?;
                     buck_rules.insert(func_name.to_string(), Rule::BuildscriptRun(rule));
+                }
+                "http_archive" => {
+                    let rule = HttpArchive::from_py_dict(kwargs)?;
+                    buck_rules.insert(func_name.to_string(), Rule::HttpArchive(rule));
+                }
+                "filegroup" => {
+                    let rule = FileGroup::from_py_dict(kwargs)?;
+                    buck_rules.insert(func_name.to_string(), Rule::FileGroup(rule));
                 }
                 _ => panic!("Unknown function name: {}", func_name),
             }

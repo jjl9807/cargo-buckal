@@ -8,9 +8,14 @@ use crate::{
 };
 
 #[derive(Parser, Debug)]
-pub struct MigrateArgs {}
+pub struct MigrateArgs {
+    #[clap(long, name = "override")]
+    pub _override: bool,
+    #[clap(long)]
+    pub separate: bool,
+}
 
-pub fn execute(_args: &MigrateArgs) {
+pub fn execute(args: &MigrateArgs) {
     // Ensure all prerequisites are installed before proceeding
     ensure_prerequisites().unwrap_or_exit();
 
@@ -24,12 +29,16 @@ pub fn execute(_args: &MigrateArgs) {
     flush_root(&ctx);
 
     // Process dep nodes
-    let old_cache = BuckalCache::load();
+    let last_cache = if args._override || BuckalCache::load().is_err() {
+        BuckalCache::new_empty()
+    } else {
+        BuckalCache::load().unwrap_or_exit_ctx("failed to load existing cache")
+    };
     let new_cache = BuckalCache::new(&ctx.nodes_map);
-    let changes = new_cache.diff(&old_cache);
+    let changes = new_cache.diff(&last_cache);
 
     // Apply changes to BUCK files
-    changes.apply(&ctx);
+    changes.apply(&ctx, args.separate);
 
     // Flush the new cache
     new_cache.save();

@@ -8,7 +8,6 @@ use std::{
 use cargo_metadata::{
     DepKindInfo, DependencyKind, Node, Package, PackageId, Target, camino::Utf8PathBuf,
 };
-use fs_extra::dir::{CopyOptions, copy};
 use itertools::Itertools;
 use regex::Regex;
 use serde_json::Value;
@@ -16,8 +15,8 @@ use serde_json::Value;
 use crate::{
     RUST_CRATES_ROOT,
     buck::{
-        BuildscriptRun, CargoRule, CargoRustBinary, CargoRustLibrary, Glob, Load, Rule,
-        parse_buck_file, patch_buck_rules,
+        BuildscriptRun, CargoRule, CargoRustBinary, CargoRustLibrary, FileGroup, Glob, HttpArchive,
+        Load, Rule, parse_buck_file, patch_buck_rules,
     },
     buck2::Buck2Command,
     buckal_log,
@@ -26,9 +25,8 @@ use crate::{
     utils::{UnwrapOrExit, get_buck2_root, get_cfgs, get_target, get_vendor_dir},
 };
 
-pub fn buckify_dep_node(node: &Node, packages_map: &HashMap<PackageId, Package>) -> Vec<Rule> {
-    let package = packages_map.get(&node.id).unwrap().to_owned();
-    let buckal_name = format!("{}-{}", package.name, package.version);
+pub fn buckify_dep_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
+    let package = ctx.packages_map.get(&node.id).unwrap().to_owned();
 
     // emit buck rules for lib target
     let mut buck_rules: Vec<Rule> = Vec::new();
@@ -47,13 +45,16 @@ pub fn buckify_dep_node(node: &Node, packages_map: &HashMap<PackageId, Package>)
         })
         .expect("No library target found");
 
+    let http_archive = emit_http_archive(&package, ctx);
+    buck_rules.push(Rule::HttpArchive(http_archive));
+
     let rust_library = emit_rust_library(
         &package,
         node,
-        packages_map,
+        &ctx.packages_map,
         lib_target,
         &manifest_dir,
-        &buckal_name,
+        &package.name,
     );
 
     buck_rules.push(Rule::CargoRustLibrary(rust_library));
@@ -71,22 +72,21 @@ pub fn buckify_dep_node(node: &Node, packages_map: &HashMap<PackageId, Package>)
             build_target,
             &package,
             node,
-            packages_map,
-            &buckal_name,
+            &ctx.packages_map,
             &manifest_dir,
         );
         buck_rules.push(Rule::CargoRustBinary(buildscript_build));
 
         // create the build script run rule
-        let buildscript_run = emit_buildscript_run(&package, node, &buckal_name, build_target);
+        let buildscript_run = emit_buildscript_run(&package, node, build_target);
         buck_rules.push(Rule::BuildscriptRun(buildscript_run));
     }
 
     buck_rules
 }
 
-pub fn buckify_root_node(node: &Node, packages_map: &HashMap<PackageId, Package>) -> Vec<Rule> {
-    let package = packages_map.get(&node.id).unwrap().to_owned();
+pub fn buckify_root_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
+    let package = ctx.packages_map.get(&node.id).unwrap().to_owned();
 
     let bin_targets = package
         .targets
@@ -109,8 +109,11 @@ pub fn buckify_root_node(node: &Node, packages_map: &HashMap<PackageId, Package>
 
     let mut buck_rules: Vec<Rule> = Vec::new();
 
-    let cwd = std::env::current_dir().expect("Failed to get current directory");
-    let manifest_dir = Utf8PathBuf::from(cwd.to_str().unwrap());
+    let manifest_dir = package.manifest_path.parent().unwrap().to_owned();
+
+    // emit filegroup rule for vendor
+    let filegroup = emit_filegroup(&package);
+    buck_rules.push(Rule::FileGroup(filegroup));
 
     // emit buck rules for bin targets
     for bin_target in &bin_targets {
@@ -119,7 +122,7 @@ pub fn buckify_root_node(node: &Node, packages_map: &HashMap<PackageId, Package>
         let rust_binary = emit_rust_binary(
             &package,
             node,
-            packages_map,
+            &ctx.packages_map,
             bin_target,
             &manifest_dir,
             &buckal_name,
@@ -140,14 +143,13 @@ pub fn buckify_root_node(node: &Node, packages_map: &HashMap<PackageId, Package>
                 build_target,
                 &package,
                 node,
-                packages_map,
-                &buckal_name,
+                &ctx.packages_map,
                 &manifest_dir,
             );
             buck_rules.push(Rule::CargoRustBinary(buildscript_build));
 
             // create the build script run rule
-            let buildscript_run = emit_buildscript_run(&package, node, &buckal_name, build_target);
+            let buildscript_run = emit_buildscript_run(&package, node, build_target);
             buck_rules.push(Rule::BuildscriptRun(buildscript_run));
         }
     }
@@ -163,7 +165,7 @@ pub fn buckify_root_node(node: &Node, packages_map: &HashMap<PackageId, Package>
         let rust_library = emit_rust_library(
             &package,
             node,
-            packages_map,
+            &ctx.packages_map,
             lib_target,
             &manifest_dir,
             &buckal_name,
@@ -184,14 +186,13 @@ pub fn buckify_root_node(node: &Node, packages_map: &HashMap<PackageId, Package>
                 build_target,
                 &package,
                 node,
-                packages_map,
-                &buckal_name,
+                &ctx.packages_map,
                 &manifest_dir,
             );
             buck_rules.push(Rule::CargoRustBinary(buildscript_build));
 
             // create the build script run rule
-            let buildscript_run = emit_buildscript_run(&package, node, &buckal_name, build_target);
+            let buildscript_run = emit_buildscript_run(&package, node, build_target);
             buck_rules.push(Rule::BuildscriptRun(buildscript_run));
         }
     }
@@ -201,20 +202,11 @@ pub fn buckify_root_node(node: &Node, packages_map: &HashMap<PackageId, Package>
 
 pub fn vendor_package(package: &Package) -> Utf8PathBuf {
     // Vendor the package sources to `third-party/rust/crates/<package_name>/<version>`
-    let manifest_path = package.manifest_path.clone();
-    let src_path = manifest_path.parent().unwrap().to_owned();
     let vendor_dir = get_vendor_dir(&package.name, &package.version.to_string())
         .unwrap_or_exit_ctx("failed to get vendor directory");
     if !vendor_dir.exists() {
         std::fs::create_dir_all(&vendor_dir).expect("Failed to create target directory");
     }
-    let copy_options = CopyOptions {
-        skip_exist: false,
-        overwrite: true,
-        content_only: true,
-        ..Default::default()
-    };
-    copy(&src_path, &vendor_dir, &copy_options).expect("Failed to copy package sources");
 
     vendor_dir
 }
@@ -223,7 +215,7 @@ pub fn gen_cargo_env(package: &Package) -> Map<String, String> {
     // Generate cargo environment variables
     let mut cargo_env: Map<String, String> = Map::new();
     cargo_env.insert("CARGO_CRATE_NAME".to_owned(), package.name.to_string());
-    cargo_env.insert("CARGO_MANIFEST_DIR".to_owned(), ".".to_owned());
+    cargo_env.insert("CARGO_MANIFEST_DIR".to_owned(), "vendor".to_owned());
     cargo_env.insert("CARGO_PKG_AUTHORS".to_owned(), package.authors.join(":"));
     cargo_env.insert(
         "CARGO_PKG_DESCRIPTION".to_owned(),
@@ -308,7 +300,6 @@ fn set_deps(
 ) {
     for dep in &node.deps {
         if let Some(dep_package) = packages_map.get(&dep.pkg) {
-            let dep_name = format!("{}-{}", dep_package.name, dep_package.version);
             let dep_package_name = dep_package.name.to_string();
             if dep.dep_kinds.iter().any(|dk| {
                 (!is_build_script && dk.kind == DependencyKind::Normal
@@ -359,7 +350,7 @@ fn set_deps(
                                 .and_then(|n| n.as_str())
                                 .expect("Failed to get target name");
 
-                            if dep.name != dep_package_name {
+                            if dep.name != dep_package_name.replace("-", "_") {
                                 // renamed dependency
                                 rust_rule.named_deps_mut().insert(
                                     dep.name.clone(),
@@ -380,19 +371,19 @@ fn set_deps(
                     }
                 } else {
                     // third-party dependency
-                    if dep.name != dep_package_name {
+                    if dep.name != dep_package_name.replace("-", "_") {
                         // renamed dependency
                         rust_rule.named_deps_mut().insert(
                             dep.name.clone(),
                             format!(
-                                "//{RUST_CRATES_ROOT}/{}/{}:{dep_name}",
-                                dep_package.name, dep_package.version
+                                "//{RUST_CRATES_ROOT}/{}/{}:{}",
+                                dep_package.name, dep_package.version, dep_package.name
                             ),
                         );
                     } else {
                         rust_rule.deps_mut().insert(format!(
-                            "//{RUST_CRATES_ROOT}/{}/{}:{dep_name}",
-                            dep_package.name, dep_package.version
+                            "//{RUST_CRATES_ROOT}/{}/{}:{}",
+                            dep_package.name, dep_package.version, dep_package.name
                         ));
                     }
                 }
@@ -412,10 +403,7 @@ fn emit_rust_library(
 ) -> CargoRustLibrary {
     let mut rust_library = CargoRustLibrary {
         name: buckal_name.to_owned(),
-        srcs: Glob {
-            include: Set::from(["**/**".to_owned()]),
-            exclude: Set::from(["BUCK".to_owned()]),
-        },
+        srcs: Set::from([get_vendor_target(package)]),
         crate_name: package.name.to_string(),
         edition: package.edition.to_string(),
         env: gen_cargo_env(package),
@@ -432,12 +420,14 @@ fn emit_rust_library(
     }
 
     // Set the crate root path
-    rust_library.crate_root = lib_target
-        .src_path
-        .to_owned()
-        .strip_prefix(manifest_dir)
-        .expect("Failed to get library source path")
-        .to_string();
+    rust_library.crate_root = format!(
+        "vendor/{}",
+        lib_target
+            .src_path
+            .to_owned()
+            .strip_prefix(manifest_dir)
+            .expect("Failed to get library source path")
+    );
 
     // Set dependencies
     set_deps(&mut rust_library, node, packages_map, false);
@@ -456,10 +446,7 @@ fn emit_rust_binary(
 ) -> CargoRustBinary {
     let mut rust_binary = CargoRustBinary {
         name: buckal_name.to_owned(),
-        srcs: Glob {
-            include: Set::from(["**/**".to_owned()]),
-            exclude: Set::from(["BUCK".to_owned()]),
-        },
+        srcs: Set::from([get_vendor_target(package)]),
         crate_name: package.name.to_string(),
         edition: package.edition.to_string(),
         env: gen_cargo_env(package),
@@ -469,12 +456,14 @@ fn emit_rust_binary(
     };
 
     // Set the crate root path
-    rust_binary.crate_root = bin_target
-        .src_path
-        .to_owned()
-        .strip_prefix(manifest_dir)
-        .expect("Failed to get binary source path")
-        .to_string();
+    rust_binary.crate_root = format!(
+        "vendor/{}",
+        bin_target
+            .src_path
+            .to_owned()
+            .strip_prefix(manifest_dir)
+            .expect("Failed to get binary source path")
+    );
 
     // Set dependencies
     set_deps(&mut rust_binary, node, packages_map, false);
@@ -489,26 +478,26 @@ fn emit_buildscript_build(
     package: &Package,
     node: &Node,
     packages_map: &HashMap<PackageId, Package>,
-    buckal_name: &String,
     manifest_dir: &Utf8PathBuf,
 ) -> CargoRustBinary {
     // process the build script in rust_library
     let build_name = get_build_name(&build_target.name);
     rust_rule.env_mut().insert(
         "OUT_DIR".to_owned(),
-        format!("$(location :{buckal_name}-{build_name}-run[out_dir])").to_owned(),
+        format!("$(location :{}-{build_name}-run[out_dir])", package.name).to_owned(),
     );
-    rust_rule
-        .rustc_flags_mut()
-        .insert(format!("@$(location :{buckal_name}-{build_name}-run[rustc_flags])").to_owned());
+    rust_rule.rustc_flags_mut().insert(
+        format!(
+            "@$(location :{}-{build_name}-run[rustc_flags])",
+            package.name
+        )
+        .to_owned(),
+    );
 
     // create the build script rule
     let mut buildscript_build = CargoRustBinary {
-        name: format!("{}-{}", buckal_name, build_target.name),
-        srcs: Glob {
-            include: Set::from(["**/**".to_owned()]),
-            exclude: Set::from(["BUCK".to_owned()]),
-        },
+        name: format!("{}-{}", package.name, build_target.name),
+        srcs: Set::from([get_vendor_target(package)]),
         crate_name: build_target.name.to_owned(),
         edition: package.edition.to_string(),
         env: gen_cargo_env(package),
@@ -517,12 +506,14 @@ fn emit_buildscript_build(
     };
 
     // Set the crate root path for the build script
-    buildscript_build.crate_root = build_target
-        .src_path
-        .to_owned()
-        .strip_prefix(manifest_dir)
-        .expect("Failed to get library source path")
-        .to_string();
+    buildscript_build.crate_root = format!(
+        "vendor/{}",
+        build_target
+            .src_path
+            .to_owned()
+            .strip_prefix(manifest_dir)
+            .expect("Failed to get library source path")
+    );
 
     // Set dependencies for the build script
     set_deps(&mut buildscript_build, node, packages_map, true);
@@ -531,22 +522,52 @@ fn emit_buildscript_build(
 }
 
 /// Emit `buildscript_run` rule for the given build target
-fn emit_buildscript_run(
-    package: &Package,
-    node: &Node,
-    buckal_name: &String,
-    build_target: &Target,
-) -> BuildscriptRun {
+fn emit_buildscript_run(package: &Package, node: &Node, build_target: &Target) -> BuildscriptRun {
     // create the build script run rule
     let build_name = get_build_name(&build_target.name);
     BuildscriptRun {
-        name: format!("{buckal_name}-{}-run", build_name),
+        name: format!("{}-{}-run", package.name, build_name),
         package_name: package.name.to_string(),
-        buildscript_rule: format!(":{}-{}", buckal_name, build_target.name),
+        buildscript_rule: format!(":{}-{}", package.name, build_target.name),
         features: Set::from_iter(node.features.iter().map(|f| f.to_string())),
         version: package.version.to_string(),
-        local_manifest_dir: "**".to_owned(),
+        manifest_dir: format!(":{}-vendor", package.name),
         ..Default::default()
+    }
+}
+
+/// Emit `http_archive` rule for the given package
+fn emit_http_archive(package: &Package, ctx: &BuckalContext) -> HttpArchive {
+    let vendor_name = format!("{}-vendor", package.name);
+    let url = format!(
+        "https://static.crates.io/crates/{}/{}-{}.crate",
+        package.name, package.name, package.version
+    );
+    let buckal_name = format!("{}-{}", package.name, package.version);
+    let checksum = ctx
+        .checksums_map
+        .get(&format!("{}-{}", package.name, package.version))
+        .unwrap();
+
+    HttpArchive {
+        name: vendor_name,
+        urls: Set::from([url]),
+        sha256: checksum.to_string(),
+        _type: "tar.gz".to_owned(),
+        strip_prefix: buckal_name,
+        out: Some("vendor".to_owned()),
+    }
+}
+
+fn emit_filegroup(package: &Package) -> FileGroup {
+    let vendor_name = format!("{}-vendor", package.name);
+    FileGroup {
+        name: vendor_name,
+        srcs: Glob {
+            include: Set::from(["**/**".to_owned()]),
+            ..Default::default()
+        },
+        out: Some("vendor".to_owned()),
     }
 }
 
@@ -558,8 +579,12 @@ fn get_build_name(s: &str) -> Cow<'_, str> {
     }
 }
 
+fn get_vendor_target(package: &Package) -> String {
+    format!(":{}-vendor", package.name)
+}
+
 impl BuckalChange {
-    pub fn apply(&self, ctx: &BuckalContext) {
+    pub fn apply(&self, ctx: &BuckalContext, separate: bool) {
         // This function applies changes to the BUCK files of detected packages in the cache diff, but skips the root package.
         let re = Regex::new(r"^([^+#]+)\+([^#]+)#([^@]+)@([^+#]+)(?:\+(.+))?$")
             .expect("error creating regex");
@@ -575,8 +600,8 @@ impl BuckalChange {
                     if let Some(node) = ctx.nodes_map.get(id) {
                         let package = ctx.packages_map.get(id).unwrap();
 
-                        // Skip local packages
-                        if package.source.is_none() {
+                        if separate && package.source.is_none() {
+                            // Skip first-party packages if `--separate` is set
                             continue;
                         }
 
@@ -590,13 +615,21 @@ impl BuckalChange {
                         );
 
                         // Vendor package sources
-                        let vendor_path = vendor_package(package);
+                        let vendor_dir = if package.source.is_none() {
+                            package.manifest_path.parent().unwrap().to_owned()
+                        } else {
+                            vendor_package(package)
+                        };
 
                         // Generate BUCK rules
-                        let mut buck_rules = buckify_dep_node(node, &ctx.packages_map);
+                        let mut buck_rules = if package.source.is_none() {
+                            buckify_root_node(node, ctx)
+                        } else {
+                            buckify_dep_node(node, ctx)
+                        };
 
                         // Patch BUCK Rules
-                        let buck_path = vendor_path.join("BUCK");
+                        let buck_path = vendor_dir.join("BUCK");
                         if buck_path.exists() {
                             let existing_rules = parse_buck_file(&buck_path)
                                 .expect("Failed to parse existing BUCK file");
@@ -649,7 +682,7 @@ pub fn flush_root(ctx: &BuckalContext) {
     let buck_path = Utf8PathBuf::from(cwd.to_str().unwrap()).join("BUCK");
 
     // Generate BUCK rules
-    let buck_rules = buckify_root_node(root_node, &ctx.packages_map);
+    let buck_rules = buckify_root_node(root_node, ctx);
 
     // Generate the BUCK file
     let buck_content = gen_buck_content(&buck_rules);
