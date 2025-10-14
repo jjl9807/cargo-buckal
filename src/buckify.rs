@@ -68,7 +68,6 @@ pub fn buckify_dep_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
     if let Some(build_target) = custom_build_target {
         // create the build script rule
         let buildscript_build = emit_buildscript_build(
-            buck_rules.last_mut().unwrap().as_cargo_rule_mut().unwrap(),
             build_target,
             &package,
             node,
@@ -80,6 +79,13 @@ pub fn buckify_dep_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
         // create the build script run rule
         let buildscript_run = emit_buildscript_run(&package, node, build_target);
         buck_rules.push(Rule::BuildscriptRun(buildscript_run));
+
+        // Patch the rust_library rule to support build scripts
+        for rule in &mut buck_rules {
+            if let Some(rust_rule) = rule.as_cargo_rule_mut() {
+                patch_with_buildscript(rust_rule, build_target, &package);
+            }
+        }
     }
 
     buck_rules
@@ -129,29 +135,6 @@ pub fn buckify_root_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
         );
 
         buck_rules.push(Rule::CargoRustBinary(rust_binary));
-
-        // Check if the package has a build script
-        let custom_build_target = package
-            .targets
-            .iter()
-            .find(|t| t.kind.contains(&cargo_metadata::TargetKind::CustomBuild));
-
-        if let Some(build_target) = custom_build_target {
-            // create the build script rule
-            let buildscript_build = emit_buildscript_build(
-                buck_rules.last_mut().unwrap().as_cargo_rule_mut().unwrap(),
-                build_target,
-                &package,
-                node,
-                &ctx.packages_map,
-                &manifest_dir,
-            );
-            buck_rules.push(Rule::CargoRustBinary(buildscript_build));
-
-            // create the build script run rule
-            let buildscript_run = emit_buildscript_run(&package, node, build_target);
-            buck_rules.push(Rule::BuildscriptRun(buildscript_run));
-        }
     }
 
     // emit buck rules for lib targets
@@ -172,28 +155,34 @@ pub fn buckify_root_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
         );
 
         buck_rules.push(Rule::CargoRustLibrary(rust_library));
+    }
 
-        // Check if the package has a build script
-        let custom_build_target = package
-            .targets
-            .iter()
-            .find(|t| t.kind.contains(&cargo_metadata::TargetKind::CustomBuild));
+    // Check if the package has a build script
+    let custom_build_target = package
+        .targets
+        .iter()
+        .find(|t| t.kind.contains(&cargo_metadata::TargetKind::CustomBuild));
 
-        if let Some(build_target) = custom_build_target {
-            // create the build script build rule
-            let buildscript_build = emit_buildscript_build(
-                buck_rules.last_mut().unwrap().as_cargo_rule_mut().unwrap(),
-                build_target,
-                &package,
-                node,
-                &ctx.packages_map,
-                &manifest_dir,
-            );
-            buck_rules.push(Rule::CargoRustBinary(buildscript_build));
+    if let Some(build_target) = custom_build_target {
+        // create the build script rule
+        let buildscript_build = emit_buildscript_build(
+            build_target,
+            &package,
+            node,
+            &ctx.packages_map,
+            &manifest_dir,
+        );
+        buck_rules.push(Rule::CargoRustBinary(buildscript_build));
 
-            // create the build script run rule
-            let buildscript_run = emit_buildscript_run(&package, node, build_target);
-            buck_rules.push(Rule::BuildscriptRun(buildscript_run));
+        // create the build script run rule
+        let buildscript_run = emit_buildscript_run(&package, node, build_target);
+        buck_rules.push(Rule::BuildscriptRun(buildscript_run));
+
+        // Patch the rust_library and rust_binary rules to support build scripts
+        for rule in &mut buck_rules {
+            if let Some(rust_rule) = rule.as_cargo_rule_mut() {
+                patch_with_buildscript(rust_rule, build_target, &package);
+            }
         }
     }
 
@@ -473,27 +462,12 @@ fn emit_rust_binary(
 
 /// Emit `buildscript_build` rule for the given build target
 fn emit_buildscript_build(
-    rust_rule: &mut dyn CargoRule,
     build_target: &Target,
     package: &Package,
     node: &Node,
     packages_map: &HashMap<PackageId, Package>,
     manifest_dir: &Utf8PathBuf,
 ) -> CargoRustBinary {
-    // process the build script in rust_library
-    let build_name = get_build_name(&build_target.name);
-    rust_rule.env_mut().insert(
-        "OUT_DIR".to_owned(),
-        format!("$(location :{}-{build_name}-run[out_dir])", package.name).to_owned(),
-    );
-    rust_rule.rustc_flags_mut().insert(
-        format!(
-            "@$(location :{}-{build_name}-run[rustc_flags])",
-            package.name
-        )
-        .to_owned(),
-    );
-
     // create the build script rule
     let mut buildscript_build = CargoRustBinary {
         name: format!("{}-{}", package.name, build_target.name),
@@ -534,6 +508,22 @@ fn emit_buildscript_run(package: &Package, node: &Node, build_target: &Target) -
         manifest_dir: format!(":{}-vendor", package.name),
         ..Default::default()
     }
+}
+
+/// Patch the given `cargo.rust_library` or `cargo.rust_binary` rule to support build scripts
+fn patch_with_buildscript(rust_rule: &mut dyn CargoRule, build_target: &Target, package: &Package) {
+    let build_name = get_build_name(&build_target.name);
+    rust_rule.env_mut().insert(
+        "OUT_DIR".to_owned(),
+        format!("$(location :{}-{build_name}-run[out_dir])", package.name).to_owned(),
+    );
+    rust_rule.rustc_flags_mut().insert(
+        format!(
+            "@$(location :{}-{build_name}-run[rustc_flags])",
+            package.name
+        )
+        .to_owned(),
+    );
 }
 
 /// Emit `http_archive` rule for the given package

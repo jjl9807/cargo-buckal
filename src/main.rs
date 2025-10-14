@@ -28,5 +28,5 @@ pub fn build_version() -> &'static str {
 
     use std::sync::OnceLock;
     static VERSION_STRING: OnceLock<String> = OnceLock::new();
-    VERSION_STRING.get_or_init(|| version())
+    VERSION_STRING.get_or_init(version)
 }
