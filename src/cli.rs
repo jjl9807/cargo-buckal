@@ -1,7 +1,9 @@
 use clap::Parser;
 
+use crate::build_version;
+
 #[derive(Parser, Debug)]
-#[command(version, author, about = "A cargo plugin for Buck2", long_about = None)]
+#[command(name = "buckal", version = build_version(), about = "A cargo plugin for Buck2", long_about = None)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
@@ -44,6 +46,9 @@ pub enum BuckalSubCommands {
 
     /// Remove dependencies from a manifest file
     Remove(crate::commands::remove::RemoveArgs),
+
+    /// Print version information
+    Version(crate::commands::version::VersionArgs),
 }
 
 impl Cli {
@@ -58,6 +63,7 @@ impl Cli {
                 BuckalSubCommands::Migrate(args) => crate::commands::migrate::execute(args),
                 BuckalSubCommands::Update(args) => crate::commands::update::execute(args),
                 BuckalSubCommands::Remove(args) => crate::commands::remove::execute(args),
+                BuckalSubCommands::Version(args) => crate::commands::version::execute(args),
             },
         }
     }

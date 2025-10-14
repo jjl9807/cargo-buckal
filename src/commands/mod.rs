@@ -6,3 +6,4 @@ pub mod migrate;
 pub mod new;
 pub mod remove;
 pub mod update;
+pub mod version;

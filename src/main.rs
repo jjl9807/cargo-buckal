@@ -16,3 +16,17 @@ pub fn main() {
     let args = cli::Cli::parse();
     args.run();
 }
+
+pub fn build_version() -> &'static str {
+    fn version() -> String {
+        let pkg_version = env!("CARGO_PKG_VERSION");
+        let git_hash = option_env!("GIT_HASH").unwrap_or("unknown");
+        let commit_date = option_env!("COMMIT_DATE").unwrap_or("unknown");
+
+        format!("{} ({} {})", pkg_version, git_hash, commit_date)
+    }
+
+    use std::sync::OnceLock;
+    static VERSION_STRING: OnceLock<String> = OnceLock::new();
+    VERSION_STRING.get_or_init(|| version())
+}
