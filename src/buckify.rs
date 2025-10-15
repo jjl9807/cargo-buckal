@@ -66,6 +66,13 @@ pub fn buckify_dep_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
         .find(|t| t.kind.contains(&cargo_metadata::TargetKind::CustomBuild));
 
     if let Some(build_target) = custom_build_target {
+        // Patch the rust_library rule to support build scripts
+        for rule in &mut buck_rules {
+            if let Some(rust_rule) = rule.as_cargo_rule_mut() {
+                patch_with_buildscript(rust_rule, build_target, &package);
+            }
+        }
+
         // create the build script rule
         let buildscript_build = emit_buildscript_build(
             build_target,
@@ -79,13 +86,6 @@ pub fn buckify_dep_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
         // create the build script run rule
         let buildscript_run = emit_buildscript_run(&package, node, build_target);
         buck_rules.push(Rule::BuildscriptRun(buildscript_run));
-
-        // Patch the rust_library rule to support build scripts
-        for rule in &mut buck_rules {
-            if let Some(rust_rule) = rule.as_cargo_rule_mut() {
-                patch_with_buildscript(rust_rule, build_target, &package);
-            }
-        }
     }
 
     buck_rules
@@ -164,6 +164,13 @@ pub fn buckify_root_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
         .find(|t| t.kind.contains(&cargo_metadata::TargetKind::CustomBuild));
 
     if let Some(build_target) = custom_build_target {
+        // Patch the rust_library and rust_binary rules to support build scripts
+        for rule in &mut buck_rules {
+            if let Some(rust_rule) = rule.as_cargo_rule_mut() {
+                patch_with_buildscript(rust_rule, build_target, &package);
+            }
+        }
+
         // create the build script rule
         let buildscript_build = emit_buildscript_build(
             build_target,
@@ -177,13 +184,6 @@ pub fn buckify_root_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
         // create the build script run rule
         let buildscript_run = emit_buildscript_run(&package, node, build_target);
         buck_rules.push(Rule::BuildscriptRun(buildscript_run));
-
-        // Patch the rust_library and rust_binary rules to support build scripts
-        for rule in &mut buck_rules {
-            if let Some(rust_rule) = rule.as_cargo_rule_mut() {
-                patch_with_buildscript(rust_rule, build_target, &package);
-            }
-        }
     }
 
     buck_rules
