@@ -393,7 +393,7 @@ fn emit_rust_library(
     let mut rust_library = CargoRustLibrary {
         name: buckal_name.to_owned(),
         srcs: Set::from([get_vendor_target(package)]),
-        crate_name: package.name.to_string(),
+        crate_name: lib_target.name.to_owned().replace("-", "_"),
         edition: package.edition.to_string(),
         env: gen_cargo_env(package),
         features: Set::from_iter(node.features.iter().map(|f| f.to_string())),
@@ -436,7 +436,7 @@ fn emit_rust_binary(
     let mut rust_binary = CargoRustBinary {
         name: buckal_name.to_owned(),
         srcs: Set::from([get_vendor_target(package)]),
-        crate_name: package.name.to_string(),
+        crate_name: bin_target.name.to_owned().replace("-", "_"),
         edition: package.edition.to_string(),
         env: gen_cargo_env(package),
         features: Set::from_iter(node.features.iter().map(|f| f.to_string())),
@@ -472,7 +472,7 @@ fn emit_buildscript_build(
     let mut buildscript_build = CargoRustBinary {
         name: format!("{}-{}", package.name, build_target.name),
         srcs: Set::from([get_vendor_target(package)]),
-        crate_name: build_target.name.to_owned(),
+        crate_name: build_target.name.to_owned().replace("-", "_"),
         edition: package.edition.to_string(),
         env: gen_cargo_env(package),
         features: Set::from_iter(node.features.iter().map(|f| f.to_string())),
