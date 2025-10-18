@@ -14,7 +14,7 @@ fn main() {
         .unwrap_or_else(|| "unknown".to_string());
 
     let git_date = Command::new("git")
-        .args(["log", "-1", "--format=%aI"])
+        .args(["log", "-1", "--format=%ad", "--date=short"])
         .output()
         .ok()
         .and_then(|output| {
@@ -23,8 +23,7 @@ fn main() {
                 .map(|s| s.trim().to_string())
         })
         .unwrap_or_else(|| "unknown".to_string());
-    let commit_date = git_date.split('T').next().unwrap_or(&git_date);
 
     println!("cargo:rustc-env=GIT_HASH={}", git_hash);
-    println!("cargo:rustc-env=COMMIT_DATE={}", commit_date);
+    println!("cargo:rustc-env=COMMIT_DATE={}", git_date);
 }
