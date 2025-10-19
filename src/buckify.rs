@@ -1,6 +1,6 @@
 use std::{
     borrow::Cow,
-    collections::{BTreeMap as Map, BTreeSet as Set, HashMap},
+    collections::{BTreeSet as Set, HashMap},
     path::PathBuf,
     vec,
 };
@@ -15,8 +15,8 @@ use serde_json::Value;
 use crate::{
     RUST_CRATES_ROOT,
     buck::{
-        BuildscriptRun, CargoRule, CargoRustBinary, CargoRustLibrary, FileGroup, Glob, HttpArchive,
-        Load, Rule, parse_buck_file, patch_buck_rules,
+        BuildscriptRun, CargoManifest, FileGroup, Glob, HttpArchive, Load, Rule, RustBinary,
+        RustLibrary, RustRule, parse_buck_file, patch_buck_rules,
     },
     buck2::Buck2Command,
     buckal_log,
@@ -48,6 +48,9 @@ pub fn buckify_dep_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
     let http_archive = emit_http_archive(&package, ctx);
     buck_rules.push(Rule::HttpArchive(http_archive));
 
+    let cargo_manifest = emit_cargo_manifest(&package);
+    buck_rules.push(Rule::CargoManifest(cargo_manifest));
+
     let rust_library = emit_rust_library(
         &package,
         node,
@@ -57,7 +60,7 @@ pub fn buckify_dep_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
         &package.name,
     );
 
-    buck_rules.push(Rule::CargoRustLibrary(rust_library));
+    buck_rules.push(Rule::RustLibrary(rust_library));
 
     // Check if the package has a build script
     let custom_build_target = package
@@ -68,7 +71,7 @@ pub fn buckify_dep_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
     if let Some(build_target) = custom_build_target {
         // Patch the rust_library rule to support build scripts
         for rule in &mut buck_rules {
-            if let Some(rust_rule) = rule.as_cargo_rule_mut() {
+            if let Some(rust_rule) = rule.as_rust_rule_mut() {
                 patch_with_buildscript(rust_rule, build_target, &package);
             }
         }
@@ -81,10 +84,10 @@ pub fn buckify_dep_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
             &ctx.packages_map,
             &manifest_dir,
         );
-        buck_rules.push(Rule::CargoRustBinary(buildscript_build));
+        buck_rules.push(Rule::RustBinary(buildscript_build));
 
         // create the build script run rule
-        let buildscript_run = emit_buildscript_run(&package, node, build_target);
+        let buildscript_run = emit_buildscript_run(&package, node, &ctx.packages_map, build_target);
         buck_rules.push(Rule::BuildscriptRun(buildscript_run));
     }
 
@@ -121,6 +124,9 @@ pub fn buckify_root_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
     let filegroup = emit_filegroup(&package);
     buck_rules.push(Rule::FileGroup(filegroup));
 
+    let cargo_manifest = emit_cargo_manifest(&package);
+    buck_rules.push(Rule::CargoManifest(cargo_manifest));
+
     // emit buck rules for bin targets
     for bin_target in &bin_targets {
         let buckal_name = bin_target.name.to_owned();
@@ -134,7 +140,7 @@ pub fn buckify_root_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
             &buckal_name,
         );
 
-        buck_rules.push(Rule::CargoRustBinary(rust_binary));
+        buck_rules.push(Rule::RustBinary(rust_binary));
     }
 
     // emit buck rules for lib targets
@@ -154,7 +160,7 @@ pub fn buckify_root_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
             &buckal_name,
         );
 
-        buck_rules.push(Rule::CargoRustLibrary(rust_library));
+        buck_rules.push(Rule::RustLibrary(rust_library));
     }
 
     // Check if the package has a build script
@@ -166,7 +172,7 @@ pub fn buckify_root_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
     if let Some(build_target) = custom_build_target {
         // Patch the rust_library and rust_binary rules to support build scripts
         for rule in &mut buck_rules {
-            if let Some(rust_rule) = rule.as_cargo_rule_mut() {
+            if let Some(rust_rule) = rule.as_rust_rule_mut() {
                 patch_with_buildscript(rust_rule, build_target, &package);
             }
         }
@@ -179,10 +185,10 @@ pub fn buckify_root_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
             &ctx.packages_map,
             &manifest_dir,
         );
-        buck_rules.push(Rule::CargoRustBinary(buildscript_build));
+        buck_rules.push(Rule::RustBinary(buildscript_build));
 
         // create the build script run rule
-        let buildscript_run = emit_buildscript_run(&package, node, build_target);
+        let buildscript_run = emit_buildscript_run(&package, node, &ctx.packages_map, build_target);
         buck_rules.push(Rule::BuildscriptRun(buildscript_run));
     }
 
@@ -200,54 +206,19 @@ pub fn vendor_package(package: &Package) -> Utf8PathBuf {
     vendor_dir
 }
 
-pub fn gen_cargo_env(package: &Package) -> Map<String, String> {
-    // Generate cargo environment variables
-    let mut cargo_env: Map<String, String> = Map::new();
-    cargo_env.insert("CARGO_CRATE_NAME".to_owned(), package.name.to_string());
-    cargo_env.insert("CARGO_MANIFEST_DIR".to_owned(), "vendor".to_owned());
-    cargo_env.insert("CARGO_PKG_AUTHORS".to_owned(), package.authors.join(":"));
-    cargo_env.insert(
-        "CARGO_PKG_DESCRIPTION".to_owned(),
-        package.description.clone().unwrap_or_default(),
-    );
-    cargo_env.insert("CARGO_PKG_NAME".to_owned(), package.name.to_string());
-    cargo_env.insert(
-        "CARGO_PKG_REPOSITORY".to_owned(),
-        package.repository.clone().unwrap_or_default(),
-    );
-    cargo_env.insert("CARGO_PKG_VERSION".to_owned(), package.version.to_string());
-    cargo_env.insert(
-        "CARGO_PKG_VERSION_MAJOR".to_owned(),
-        package.version.major.to_string(),
-    );
-    cargo_env.insert(
-        "CARGO_PKG_VERSION_MINOR".to_owned(),
-        package.version.minor.to_string(),
-    );
-    cargo_env.insert(
-        "CARGO_PKG_VERSION_PATCH".to_owned(),
-        package.version.patch.to_string(),
-    );
-    cargo_env.insert(
-        "CARGO_PKG_VERSION_PRE".to_owned(),
-        package.version.pre.to_string(),
-    );
-    if let Some(links) = &package.links {
-        cargo_env.insert("CARGO_PKG_LINKS".to_owned(), links.to_string());
-    }
-
-    cargo_env
-}
-
 pub fn gen_buck_content(rules: &[Rule]) -> String {
     let loads: Vec<Rule> = vec![
         Rule::Load(Load {
-            bzl: "@prelude//rust:cargo_buildscript.bzl".to_owned(),
-            items: Set::from(["buildscript_run".to_owned()]),
+            bzl: "@buckal//:cargo_manifest.bzl".to_owned(),
+            items: Set::from(["cargo_manifest".to_owned()]),
         }),
         Rule::Load(Load {
-            bzl: "@prelude//rust:cargo_package.bzl".to_owned(),
-            items: Set::from(["cargo".to_owned()]),
+            bzl: "@buckal//:wrapper.bzl".to_owned(),
+            items: Set::from([
+                "buildscript_run".to_owned(),
+                "rust_binary".to_owned(),
+                "rust_library".to_owned(),
+            ]),
         }),
     ];
 
@@ -282,7 +253,7 @@ pub fn check_dep_target(dk: &DepKindInfo) -> bool {
 }
 
 fn set_deps(
-    rust_rule: &mut dyn CargoRule,
+    rust_rule: &mut dyn RustRule,
     node: &Node,
     packages_map: &HashMap<PackageId, Package>,
     is_build_script: bool,
@@ -389,14 +360,17 @@ fn emit_rust_library(
     lib_target: &Target,
     manifest_dir: &Utf8PathBuf,
     buckal_name: &str,
-) -> CargoRustLibrary {
-    let mut rust_library = CargoRustLibrary {
+) -> RustLibrary {
+    let mut rust_library = RustLibrary {
         name: buckal_name.to_owned(),
         srcs: Set::from([get_vendor_target(package)]),
         crate_name: lib_target.name.to_owned().replace("-", "_"),
         edition: package.edition.to_string(),
-        env: gen_cargo_env(package),
         features: Set::from_iter(node.features.iter().map(|f| f.to_string())),
+        rustc_flags: Set::from([format!(
+            "@$(location :{}-manifest[env_flags])",
+            package.name
+        )]),
         visibility: Set::from(["PUBLIC".to_owned()]),
         ..Default::default()
     };
@@ -432,14 +406,17 @@ fn emit_rust_binary(
     bin_target: &Target,
     manifest_dir: &Utf8PathBuf,
     buckal_name: &str,
-) -> CargoRustBinary {
-    let mut rust_binary = CargoRustBinary {
+) -> RustBinary {
+    let mut rust_binary = RustBinary {
         name: buckal_name.to_owned(),
         srcs: Set::from([get_vendor_target(package)]),
         crate_name: bin_target.name.to_owned().replace("-", "_"),
         edition: package.edition.to_string(),
-        env: gen_cargo_env(package),
         features: Set::from_iter(node.features.iter().map(|f| f.to_string())),
+        rustc_flags: Set::from([format!(
+            "@$(location :{}-manifest[env_flags])",
+            package.name
+        )]),
         visibility: Set::from(["PUBLIC".to_owned()]),
         ..Default::default()
     };
@@ -467,15 +444,18 @@ fn emit_buildscript_build(
     node: &Node,
     packages_map: &HashMap<PackageId, Package>,
     manifest_dir: &Utf8PathBuf,
-) -> CargoRustBinary {
+) -> RustBinary {
     // create the build script rule
-    let mut buildscript_build = CargoRustBinary {
+    let mut buildscript_build = RustBinary {
         name: format!("{}-{}", package.name, build_target.name),
         srcs: Set::from([get_vendor_target(package)]),
         crate_name: build_target.name.to_owned().replace("-", "_"),
         edition: package.edition.to_string(),
-        env: gen_cargo_env(package),
         features: Set::from_iter(node.features.iter().map(|f| f.to_string())),
+        rustc_flags: Set::from([format!(
+            "@$(location :{}-manifest[env_flags])",
+            package.name
+        )]),
         ..Default::default()
     };
 
@@ -496,22 +476,61 @@ fn emit_buildscript_build(
 }
 
 /// Emit `buildscript_run` rule for the given build target
-fn emit_buildscript_run(package: &Package, node: &Node, build_target: &Target) -> BuildscriptRun {
+fn emit_buildscript_run(
+    package: &Package,
+    node: &Node,
+    packages_map: &HashMap<PackageId, Package>,
+    build_target: &Target,
+) -> BuildscriptRun {
     // create the build script run rule
     let build_name = get_build_name(&build_target.name);
-    BuildscriptRun {
+    let mut buildscript_run = BuildscriptRun {
         name: format!("{}-{}-run", package.name, build_name),
         package_name: package.name.to_string(),
         buildscript_rule: format!(":{}-{}", package.name, build_target.name),
+        env_srcs: Set::from([format!(":{}-manifest[env_dict]", package.name)]),
         features: Set::from_iter(node.features.iter().map(|f| f.to_string())),
         version: package.version.to_string(),
         manifest_dir: format!(":{}-vendor", package.name),
+        visibility: Set::from(["PUBLIC".to_owned()]),
         ..Default::default()
+    };
+
+    // Set environment variables from dependencies
+    // See https://doc.rust-lang.org/cargo/reference/build-scripts.html#the-links-manifest-key
+    for dep in &node.deps {
+        if let Some(dep_package) = packages_map.get(&dep.pkg)
+            && dep_package.links.is_some()
+            && dep
+                .dep_kinds
+                .iter()
+                .any(|dk| dk.kind == DependencyKind::Normal && check_dep_target(dk))
+        {
+            // Only normal dependencies with The links Manifest Key for current arch are considered
+            let custom_build_target_dep = dep_package
+                .targets
+                .iter()
+                .find(|t| t.kind.contains(&cargo_metadata::TargetKind::CustomBuild));
+            if let Some(build_target_dep) = custom_build_target_dep {
+                let build_name_dep = get_build_name(&build_target_dep.name);
+                buildscript_run.env_srcs.insert(format!(
+                    "//{RUST_CRATES_ROOT}/{}/{}:{}-{build_name_dep}-run[metadata]",
+                    dep_package.name, dep_package.version, dep_package.name
+                ));
+            } else {
+                panic!(
+                    "Dependency {} has links key but no build script target",
+                    dep_package.name
+                );
+            }
+        }
     }
+
+    buildscript_run
 }
 
-/// Patch the given `cargo.rust_library` or `cargo.rust_binary` rule to support build scripts
-fn patch_with_buildscript(rust_rule: &mut dyn CargoRule, build_target: &Target, package: &Package) {
+/// Patch the given `rust_library` or `rust_binary` rule to support build scripts
+fn patch_with_buildscript(rust_rule: &mut dyn RustRule, build_target: &Target, package: &Package) {
     let build_name = get_build_name(&build_target.name);
     rust_rule.env_mut().insert(
         "OUT_DIR".to_owned(),
@@ -549,6 +568,7 @@ fn emit_http_archive(package: &Package, ctx: &BuckalContext) -> HttpArchive {
     }
 }
 
+/// Emit `filegroup` rule for the given package
 fn emit_filegroup(package: &Package) -> FileGroup {
     let vendor_name = format!("{}-vendor", package.name);
     FileGroup {
@@ -558,6 +578,14 @@ fn emit_filegroup(package: &Package) -> FileGroup {
             ..Default::default()
         },
         out: Some("vendor".to_owned()),
+    }
+}
+
+// Emit `cargo_manifest` rule for the given package
+fn emit_cargo_manifest(package: &Package) -> CargoManifest {
+    CargoManifest {
+        name: format!("{}-manifest", package.name),
+        vendor: get_vendor_target(package),
     }
 }
 

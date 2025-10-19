@@ -13,22 +13,23 @@ pub enum Rule {
     Load(Load),
     HttpArchive(HttpArchive),
     FileGroup(FileGroup),
-    CargoRustLibrary(CargoRustLibrary),
-    CargoRustBinary(CargoRustBinary),
+    CargoManifest(CargoManifest),
+    RustLibrary(RustLibrary),
+    RustBinary(RustBinary),
     BuildscriptRun(BuildscriptRun),
 }
 
 impl Rule {
-    pub fn as_cargo_rule_mut(&mut self) -> Option<&mut dyn CargoRule> {
+    pub fn as_rust_rule_mut(&mut self) -> Option<&mut dyn RustRule> {
         match self {
-            Rule::CargoRustLibrary(inner) => Some(inner),
-            Rule::CargoRustBinary(inner) => Some(inner),
+            Rule::RustLibrary(inner) => Some(inner),
+            Rule::RustBinary(inner) => Some(inner),
             _ => None,
         }
     }
 }
 
-pub trait CargoRule {
+pub trait RustRule {
     fn deps_mut(&mut self) -> &mut Set<String>;
     fn rustc_flags_mut(&mut self) -> &mut Set<String>;
     fn env_mut(&mut self) -> &mut Map<String, String>;
@@ -55,8 +56,15 @@ pub struct HttpArchive {
 }
 
 #[derive(Serialize, Default, Debug)]
-#[serde(rename = "cargo.rust_library")]
-pub struct CargoRustLibrary {
+#[serde(rename = "cargo_manifest")]
+pub struct CargoManifest {
+    pub name: String,
+    pub vendor: String,
+}
+
+#[derive(Serialize, Default, Debug)]
+#[serde(rename = "rust_library")]
+pub struct RustLibrary {
     pub name: String,
     pub srcs: Set<String>,
     #[serde(rename = "crate")]
@@ -79,8 +87,8 @@ pub struct CargoRustLibrary {
 }
 
 #[derive(Serialize, Default, Debug)]
-#[serde(rename = "cargo.rust_binary")]
-pub struct CargoRustBinary {
+#[serde(rename = "rust_binary")]
+pub struct RustBinary {
     pub name: String,
     pub srcs: Set<String>,
     #[serde(rename = "crate")]
@@ -108,6 +116,8 @@ pub struct BuildscriptRun {
     pub buildscript_rule: String,
     #[serde(skip_serializing_if = "Map::is_empty")]
     pub env: Map<String, String>,
+    #[serde(skip_serializing_if = "Set::is_empty")]
+    pub env_srcs: Set<String>,
     #[serde(skip_serializing_if = "Set::is_empty")]
     pub features: Set<String>,
     pub version: String,
@@ -187,24 +197,16 @@ impl Glob {
         } else {
             let kwargs_binding = tuple.get_item(2).unwrap();
             let kwargs = kwargs_binding.downcast::<PyDict>().unwrap();
-            let include_vec: Vec<String> = kwargs
-                .get_item("include")
-                .expect("Expected 'include' argument")
-                .and_then(|v| v.extract().ok())
-                .unwrap_or_default();
+            let include_vec: Vec<String> = get_arg(kwargs, "include");
             let include: Set<String> = include_vec.into_iter().collect();
-            let exclude_vec: Vec<String> = kwargs
-                .get_item("exclude")
-                .expect("Expected 'exclude' argument")
-                .and_then(|v| v.extract().ok())
-                .unwrap_or_default();
+            let exclude_vec: Vec<String> = get_arg(kwargs, "exclude");
             let exclude: Set<String> = exclude_vec.into_iter().collect();
             Ok(Glob { include, exclude })
         }
     }
 }
 
-impl CargoRule for CargoRustLibrary {
+impl RustRule for RustLibrary {
     fn deps_mut(&mut self) -> &mut Set<String> {
         &mut self.deps
     }
@@ -222,7 +224,7 @@ impl CargoRule for CargoRustLibrary {
     }
 }
 
-impl CargoRule for CargoRustBinary {
+impl RustRule for RustBinary {
     fn deps_mut(&mut self) -> &mut Set<String> {
         &mut self.deps
     }
@@ -240,74 +242,26 @@ impl CargoRule for CargoRustBinary {
     }
 }
 
-impl CargoRustLibrary {
+impl RustLibrary {
     fn from_py_dict(kwargs: &Bound<'_, PyDict>) -> PyResult<Self> {
-        let name: String = kwargs
-            .get_item("name")
-            .expect("Expected 'name' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
-        let srcs_vec: Vec<String> = kwargs
-            .get_item("srcs")
-            .expect("Expected 'srcs' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
+        let name: String = get_arg(kwargs, "name");
+        let srcs_vec: Vec<String> = get_arg(kwargs, "srcs");
         let srcs: Set<String> = srcs_vec.into_iter().collect();
-        let crate_name: String = kwargs
-            .get_item("crate")
-            .expect("Expected 'crate' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
-        let crate_root: String = kwargs
-            .get_item("crate_root")
-            .expect("Expected 'crate_root' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
-        let edition: String = kwargs
-            .get_item("edition")
-            .expect("Expected 'edition' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
-        let env: Map<String, String> = kwargs
-            .get_item("env")
-            .expect("Expected 'env' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
-        let features_vec: Vec<String> = kwargs
-            .get_item("features")
-            .expect("Expected 'features' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
+        let crate_name: String = get_arg(kwargs, "crate");
+        let crate_root: String = get_arg(kwargs, "crate_root");
+        let edition: String = get_arg(kwargs, "edition");
+        let env: Map<String, String> = get_arg(kwargs, "env");
+        let features_vec: Vec<String> = get_arg(kwargs, "features");
         let features: Set<String> = features_vec.into_iter().collect();
-        let rustc_flags_vec: Vec<String> = kwargs
-            .get_item("rustc_flags")
-            .expect("Expected 'rustc_flags' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
+        let rustc_flags_vec: Vec<String> = get_arg(kwargs, "rustc_flags");
         let rustc_flags: Set<String> = rustc_flags_vec.into_iter().collect();
-        let proc_macro: Option<bool> = kwargs
-            .get_item("proc_macro")
-            .expect("Expected 'proc_macro' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
-        let named_deps: Map<String, String> = kwargs
-            .get_item("named_deps")
-            .expect("Expected 'named_deps' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
-        let visibility_vec: Vec<String> = kwargs
-            .get_item("visibility")
-            .expect("Expected 'visibility' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
+        let proc_macro: Option<bool> = get_arg(kwargs, "proc_macro");
+        let named_deps: Map<String, String> = get_arg(kwargs, "named_deps");
+        let visibility_vec: Vec<String> = get_arg(kwargs, "visibility");
         let visibility: Set<String> = visibility_vec.into_iter().collect();
-        let deps_vec: Vec<String> = kwargs
-            .get_item("deps")
-            .expect("Expected 'deps' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
+        let deps_vec: Vec<String> = get_arg(kwargs, "deps");
         let deps: Set<String> = deps_vec.into_iter().collect();
-        Ok(CargoRustLibrary {
+        Ok(RustLibrary {
             name,
             srcs,
             crate_name,
@@ -323,7 +277,7 @@ impl CargoRustLibrary {
         })
     }
 
-    fn patch_from(&mut self, other: &CargoRustLibrary) {
+    fn patch_from(&mut self, other: &RustLibrary) {
         // Patch env map
         for (k, v) in &other.env {
             self.env.entry(k.clone()).or_insert_with(|| v.clone());
@@ -348,69 +302,25 @@ impl CargoRustLibrary {
     }
 }
 
-impl CargoRustBinary {
+impl RustBinary {
     fn from_py_dict(kwargs: &Bound<'_, PyDict>) -> PyResult<Self> {
-        let name: String = kwargs
-            .get_item("name")
-            .expect("Expected 'name' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
-        let srcs_vec: Vec<String> = kwargs
-            .get_item("srcs")
-            .expect("Expected 'srcs' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
+        let name: String = get_arg(kwargs, "name");
+        let srcs_vec: Vec<String> = get_arg(kwargs, "srcs");
         let srcs: Set<String> = srcs_vec.into_iter().collect();
-        let crate_name: String = kwargs
-            .get_item("crate")
-            .expect("Expected 'crate' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
-        let crate_root: String = kwargs
-            .get_item("crate_root")
-            .expect("Expected 'crate_root' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
-        let edition: String = kwargs
-            .get_item("edition")
-            .expect("Expected 'edition' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
-        let env: Map<String, String> = kwargs
-            .get_item("env")
-            .expect("Expected 'env' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
-        let features_vec: Vec<String> = kwargs
-            .get_item("features")
-            .expect("Expected 'features' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
+        let crate_name: String = get_arg(kwargs, "crate");
+        let crate_root: String = get_arg(kwargs, "crate_root");
+        let edition: String = get_arg(kwargs, "edition");
+        let env: Map<String, String> = get_arg(kwargs, "env");
+        let features_vec: Vec<String> = get_arg(kwargs, "features");
         let features: Set<String> = features_vec.into_iter().collect();
-        let rustc_flags_vec: Vec<String> = kwargs
-            .get_item("rustc_flags")
-            .expect("Expected 'rustc_flags' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
+        let rustc_flags_vec: Vec<String> = get_arg(kwargs, "rustc_flags");
         let rustc_flags: Set<String> = rustc_flags_vec.into_iter().collect();
-        let named_deps: Map<String, String> = kwargs
-            .get_item("named_deps")
-            .expect("Expected 'named_deps' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
-        let visibility_vec: Vec<String> = kwargs
-            .get_item("visibility")
-            .expect("Expected 'visibility' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
+        let named_deps: Map<String, String> = get_arg(kwargs, "named_deps");
+        let visibility_vec: Vec<String> = get_arg(kwargs, "visibility");
         let visibility: Set<String> = visibility_vec.into_iter().collect();
-        let deps_vec: Vec<String> = kwargs
-            .get_item("deps")
-            .expect("Expected 'deps' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
+        let deps_vec: Vec<String> = get_arg(kwargs, "deps");
         let deps: Set<String> = deps_vec.into_iter().collect();
-        Ok(CargoRustBinary {
+        Ok(RustBinary {
             name,
             srcs,
             crate_name,
@@ -425,7 +335,7 @@ impl CargoRustBinary {
         })
     }
 
-    fn patch_from(&mut self, other: &CargoRustBinary) {
+    fn patch_from(&mut self, other: &RustBinary) {
         // Patch env map
         for (k, v) in &other.env {
             self.env.entry(k.clone()).or_insert_with(|| v.clone());
@@ -452,53 +362,24 @@ impl CargoRustBinary {
 
 impl BuildscriptRun {
     fn from_py_dict(kwargs: &Bound<'_, PyDict>) -> PyResult<Self> {
-        let name: String = kwargs
-            .get_item("name")
-            .expect("Expected 'name' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
-        let package_name: String = kwargs
-            .get_item("package_name")
-            .expect("Expected 'package_name' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
-        let buildscript_rule: String = kwargs
-            .get_item("buildscript_rule")
-            .expect("Expected 'buildscript_rule' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
-        let env: Map<String, String> = kwargs
-            .get_item("env")
-            .expect("Expected 'env' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
-        let features_vec: Vec<String> = kwargs
-            .get_item("features")
-            .expect("Expected 'features' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
+        let name: String = get_arg(kwargs, "name");
+        let package_name: String = get_arg(kwargs, "package_name");
+        let buildscript_rule: String = get_arg(kwargs, "buildscript_rule");
+        let env: Map<String, String> = get_arg(kwargs, "env");
+        let env_srcs_vec: Vec<String> = get_arg(kwargs, "env_srcs");
+        let env_srcs: Set<String> = env_srcs_vec.into_iter().collect();
+        let features_vec: Vec<String> = get_arg(kwargs, "features");
         let features: Set<String> = features_vec.into_iter().collect();
-        let version: String = kwargs
-            .get_item("version")
-            .expect("Expected 'version' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
-        let manifest_dir: String = kwargs
-            .get_item("manifest_dir")
-            .expect("Expected 'manifest_dir' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
-        let visibility_vec: Vec<String> = kwargs
-            .get_item("visibility")
-            .expect("Expected 'visibility' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
+        let version: String = get_arg(kwargs, "version");
+        let manifest_dir: String = get_arg(kwargs, "manifest_dir");
+        let visibility_vec: Vec<String> = get_arg(kwargs, "visibility");
         let visibility: Set<String> = visibility_vec.into_iter().collect();
         Ok(BuildscriptRun {
             name,
             package_name,
             buildscript_rule,
             env,
+            env_srcs,
             features,
             version,
             manifest_dir,
@@ -526,37 +407,13 @@ impl BuildscriptRun {
 
 impl HttpArchive {
     fn from_py_dict(kwargs: &Bound<'_, PyDict>) -> PyResult<Self> {
-        let name: String = kwargs
-            .get_item("name")
-            .expect("Expected 'name' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
-        let urls_vec: Vec<String> = kwargs
-            .get_item("urls")
-            .expect("Expected 'urls' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
+        let name: String = get_arg(kwargs, "name");
+        let urls_vec: Vec<String> = get_arg(kwargs, "urls");
         let urls: Set<String> = urls_vec.into_iter().collect();
-        let sha256: String = kwargs
-            .get_item("sha256")
-            .expect("Expected 'sha256' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
-        let _type: String = kwargs
-            .get_item("type")
-            .expect("Expected 'type' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
-        let strip_prefix: String = kwargs
-            .get_item("strip_prefix")
-            .expect("Expected 'strip_prefix' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
-        let out: Option<String> = kwargs
-            .get_item("out")
-            .expect("Expected 'out' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
+        let sha256: String = get_arg(kwargs, "sha256");
+        let _type: String = get_arg(kwargs, "type");
+        let strip_prefix: String = get_arg(kwargs, "strip_prefix");
+        let out: Option<String> = get_arg(kwargs, "out");
         Ok(HttpArchive {
             name,
             urls,
@@ -570,30 +427,29 @@ impl HttpArchive {
 
 impl FileGroup {
     fn from_py_dict(kwargs: &Bound<'_, PyDict>) -> PyResult<Self> {
-        let name: String = kwargs
-            .get_item("name")
-            .expect("Expected 'name' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
+        let name: String = get_arg(kwargs, "name");
         let srcs_tuple_binding = kwargs
             .get_item("srcs")
             .expect("Expected 'srcs' argument")
             .unwrap();
         let srcs_tuple = srcs_tuple_binding.downcast::<PyTuple>().unwrap();
         let srcs = Glob::from_py_tuple(srcs_tuple)?;
-        let out: Option<String> = kwargs
-            .get_item("out")
-            .expect("Expected 'out' argument")
-            .and_then(|v| v.extract().ok())
-            .unwrap_or_default();
+        let out: Option<String> = get_arg(kwargs, "out");
         Ok(FileGroup { name, srcs, out })
+    }
+}
+
+impl CargoManifest {
+    fn from_py_dict(kwargs: &Bound<'_, PyDict>) -> PyResult<Self> {
+        let name: String = get_arg(kwargs, "name");
+        let vendor: String = get_arg(kwargs, "vendor");
+        Ok(CargoManifest { name, vendor })
     }
 }
 
 pub fn parse_buck_file(file: &Utf8PathBuf) -> PyResult<Map<String, Rule>> {
     Python::attach(|py| {
         let buck = std::fs::read_to_string(file).expect("Failed to read BUCK file");
-        let buck = buck.replace("cargo.rust", "cargo_rust");
         let python_code = format!(
             r#"
 call_kwargs_list = []
@@ -606,11 +462,11 @@ def buckal_call(func):
     return wrapper
 
 @buckal_call
-def cargo_rust_library(*args, **kwargs):
+def rust_library(*args, **kwargs):
     pass
 
 @buckal_call
-def cargo_rust_binary(*args, **kwargs):
+def rust_binary(*args, **kwargs):
     pass
 
 @buckal_call
@@ -623,6 +479,10 @@ def http_archive(*args, **kwargs):
 
 @buckal_call
 def filegroup(*args, **kwargs):
+    pass
+
+@buckal_call
+def cargo_manifest(*args, **kwargs):
     pass
 
 def glob(*args, **kwargs):
@@ -660,13 +520,13 @@ def load(*args, **kwargs):
             let kwargs = binding.downcast::<PyDict>()?;
 
             match func_name {
-                "cargo_rust_library" => {
-                    let rule = CargoRustLibrary::from_py_dict(kwargs)?;
-                    buck_rules.insert(func_name.to_string(), Rule::CargoRustLibrary(rule));
+                "rust_library" => {
+                    let rule = RustLibrary::from_py_dict(kwargs)?;
+                    buck_rules.insert(func_name.to_string(), Rule::RustLibrary(rule));
                 }
-                "cargo_rust_binary" => {
-                    let rule = CargoRustBinary::from_py_dict(kwargs)?;
-                    buck_rules.insert(func_name.to_string(), Rule::CargoRustBinary(rule));
+                "rust_binary" => {
+                    let rule = RustBinary::from_py_dict(kwargs)?;
+                    buck_rules.insert(func_name.to_string(), Rule::RustBinary(rule));
                 }
                 "buildscript_run" => {
                     let rule = BuildscriptRun::from_py_dict(kwargs)?;
@@ -680,6 +540,10 @@ def load(*args, **kwargs):
                     let rule = FileGroup::from_py_dict(kwargs)?;
                     buck_rules.insert(func_name.to_string(), Rule::FileGroup(rule));
                 }
+                "cargo_manifest" => {
+                    let rule = CargoManifest::from_py_dict(kwargs)?;
+                    buck_rules.insert(func_name.to_string(), Rule::CargoManifest(rule));
+                }
                 _ => panic!("Unknown function name: {}", func_name),
             }
         }
@@ -691,17 +555,13 @@ def load(*args, **kwargs):
 pub fn patch_buck_rules(existing: &Map<String, Rule>, to_patch: &mut [Rule]) {
     for rule in to_patch.iter_mut() {
         match rule {
-            Rule::CargoRustLibrary(new_rule) => {
-                if let Some(Rule::CargoRustLibrary(existing_rule)) =
-                    existing.get("cargo_rust_library")
-                {
+            Rule::RustLibrary(new_rule) => {
+                if let Some(Rule::RustLibrary(existing_rule)) = existing.get("rust_library") {
                     new_rule.patch_from(existing_rule);
                 }
             }
-            Rule::CargoRustBinary(new_rule) => {
-                if let Some(Rule::CargoRustBinary(existing_rule)) =
-                    existing.get("cargo_rust_binary")
-                {
+            Rule::RustBinary(new_rule) => {
+                if let Some(Rule::RustBinary(existing_rule)) = existing.get("rust_binary") {
                     new_rule.patch_from(existing_rule);
                 }
             }
@@ -713,4 +573,15 @@ pub fn patch_buck_rules(existing: &Map<String, Rule>, to_patch: &mut [Rule]) {
             _ => {}
         }
     }
+}
+
+fn get_arg<'a, T>(kwargs: &Bound<'a, PyDict>, key: &str) -> T
+where
+    T: Default + FromPyObject<'a>,
+{
+    kwargs
+        .get_item(key)
+        .unwrap_or_else(|_| panic!("Expected '{}' argument", key))
+        .and_then(|v| v.extract().ok())
+        .unwrap_or_default()
 }
