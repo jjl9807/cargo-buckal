@@ -1,11 +1,12 @@
 use clap::Parser;
+use ini::Ini;
 
 use crate::{
     buckify::flush_root,
     cache::BuckalCache,
     context::BuckalContext,
     extract_bundles,
-    utils::{UnwrapOrExit, check_buck2_package, ensure_prerequisites},
+    utils::{UnwrapOrExit, check_buck2_package, ensure_prerequisites, get_buck2_root},
 };
 
 #[derive(Parser, Debug)]
@@ -35,13 +36,24 @@ pub fn execute(args: &MigrateArgs) {
 
     // Extract bundled prelude files if `--redist` is set
     if args.redist {
-        let cwd =
-            std::env::current_dir().unwrap_or_exit_ctx("failed to get current working directory");
-        if cwd.join("buckal").exists() {
-            std::fs::remove_dir_all(cwd.join("buckal"))
+        let buck2_root = get_buck2_root().unwrap_or_exit_ctx("failed to get Buck2 project root");
+        if buck2_root.join("buckal").exists() {
+            std::fs::remove_dir_all(buck2_root.join("buckal"))
                 .unwrap_or_exit_ctx("failed to overwrite custom prelude files");
         }
-        extract_bundles(&cwd).unwrap_or_exit_ctx("failed to overwrite custom prelude files");
+        extract_bundles(buck2_root.as_std_path())
+            .unwrap_or_exit_ctx("failed to overwrite custom prelude files");
+
+        let mut buck_config = Ini::load_from_file(buck2_root.join(".buckconfig"))
+            .unwrap_or_exit_ctx("failed to parse .buckconfig");
+        let cells = buck_config.section_mut(Some("cells")).unwrap();
+        if cells.contains_key("buckal") {
+            cells.remove("buckal");
+        }
+        cells.insert("buckal".to_string(), "buckal".to_string());
+        buck_config
+            .write_to_file(buck2_root.join(".buckconfig"))
+            .unwrap_or_exit_ctx("failed to update .buckconfig with 'buckal' cell entry");
     }
 
     // Process the root node
