@@ -28,6 +28,6 @@ cargo_manifest = rule(
     impl = _cargo_manifest_impl,
     attrs = {
         "vendor": attrs.dep(),
-        "executor": attrs.default_only(attrs.exec_dep(providers = [RunInfo], default = "buckal//tool:cargo_manifest_parser")),
+        "executor": attrs.default_only(attrs.exec_dep(providers = [RunInfo], default = "buckal//tool:manifest_parse")),
     },
 )

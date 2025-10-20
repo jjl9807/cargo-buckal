@@ -52,7 +52,7 @@ def main() -> None:
 
     cargo_env["CARGO_PKG_AUTHORS"] = ":".join(cargo_toml["package"].get("authors", []))
     cargo_env["CARGO_PKG_NAME"] = cargo_toml["package"]["name"]
-    # cargo_env["CARGO_PKG_DESCRIPTION"] = cargo_toml["package"].get("description", "")
+    cargo_env["CARGO_PKG_DESCRIPTION"] = cargo_toml["package"].get("description", "")
     cargo_env["CARGO_PKG_HOMEPAGE"] = cargo_toml["package"].get("homepage", "")
     cargo_env["CARGO_PKG_REPOSITORY"] = cargo_toml["package"].get("repository", "")
     # cargo_env["CARGO_PKG_LICENSE"] = cargo_toml["package"].get("license", "")
@@ -62,7 +62,12 @@ def main() -> None:
 
     env_flags = ""
     for key, value in cargo_env.items():
-        env_flags += f"--env-set={key}=\"{value}\"\n"
+        if key == "CARGO_PKG_DESCRIPTION":
+            # Escape newlines and quotes in description
+            value = value.replace("\n", "\\n").replace('"', '\\"')
+            env_flags += f"--env-set={key}=\"{value}\"\n"
+        else:
+            env_flags += f"--env-set={key}={value}\n"
     args.out_flags.write(env_flags)
 
     if cargo_toml["package"].get("links"):
