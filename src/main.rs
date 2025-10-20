@@ -9,8 +9,13 @@ mod context;
 mod utils;
 
 use clap::Parser;
+use rust_embed::RustEmbed;
 
 pub const RUST_CRATES_ROOT: &str = "third-party/rust/crates";
+
+#[derive(RustEmbed)]
+#[folder = "bundles/"]
+struct Bundles;
 
 pub fn main() {
     let args = cli::Cli::parse();
@@ -26,4 +31,20 @@ pub fn build_version() -> &'static str {
         let commit_date = option_env!("COMMIT_DATE").unwrap_or("unknown");
         format!("{} ({} {})", pkg_version, git_hash, commit_date)
     })
+}
+
+pub fn extract_bundles(dest: &std::path::Path) -> std::io::Result<()> {
+    for file in Bundles::iter() {
+        let file_path = dest.join(file.as_ref());
+        if let Some(parent) = file_path.parent()
+            && !parent.exists()
+        {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        let asset = Bundles::get(file.as_ref()).unwrap();
+        std::fs::write(&file_path, asset.data.as_ref())?;
+    }
+
+    Ok(())
 }

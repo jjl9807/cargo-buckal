@@ -602,7 +602,7 @@ fn get_vendor_target(package: &Package) -> String {
 }
 
 impl BuckalChange {
-    pub fn apply(&self, ctx: &BuckalContext, separate: bool) {
+    pub fn apply(&self, ctx: &BuckalContext) {
         // This function applies changes to the BUCK files of detected packages in the cache diff, but skips the root package.
         let re = Regex::new(r"^([^+#]+)\+([^#]+)#([^@]+)@([^+#]+)(?:\+(.+))?$")
             .expect("error creating regex");
@@ -618,7 +618,7 @@ impl BuckalChange {
                     if let Some(node) = ctx.nodes_map.get(id) {
                         let package = ctx.packages_map.get(id).unwrap();
 
-                        if separate && package.source.is_none() {
+                        if ctx.separate && package.source.is_none() {
                             // Skip first-party packages if `--separate` is set
                             continue;
                         }
@@ -649,9 +649,12 @@ impl BuckalChange {
                         // Patch BUCK Rules
                         let buck_path = vendor_dir.join("BUCK");
                         if buck_path.exists() {
-                            let existing_rules = parse_buck_file(&buck_path)
-                                .expect("Failed to parse existing BUCK file");
-                            patch_buck_rules(&existing_rules, &mut buck_rules);
+                            // Skip merging manual changes if `--no-merge` is set
+                            if !ctx.no_merge {
+                                let existing_rules = parse_buck_file(&buck_path)
+                                    .expect("Failed to parse existing BUCK file");
+                                patch_buck_rules(&existing_rules, &mut buck_rules);
+                            }
                         } else {
                             std::fs::File::create(&buck_path).expect("Failed to create BUCK file");
                         }
