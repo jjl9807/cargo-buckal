@@ -8,6 +8,9 @@ use crate::{
 
 #[derive(Parser, Debug)]
 pub struct BuildArgs {
+    /// Build optimized artifacts with the release profile
+    #[arg(short, long)]
+    pub release: bool,
     /// Use verbose output (-vv very verbose output)
     #[arg(short, action = clap::ArgAction::Count)]
     pub verbose: u8,
@@ -41,9 +44,11 @@ pub fn execute(args: &BuildArgs) {
     }
 
     let target = format!("//{relative_path}...");
-    let result = Buck2Command::build(&target)
-        .verbosity(args.verbose)
-        .status();
+    let mut buck2_cmd = Buck2Command::build(&target).verbosity(args.verbose);
+    if args.release {
+        buck2_cmd = buck2_cmd.arg("-m").arg("release");
+    }
+    let result = buck2_cmd.status();
 
     match result {
         Ok(status) if status.success() => {}

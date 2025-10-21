@@ -62,7 +62,7 @@ pub fn execute(args: &RemoveArgs) {
     let changes = new_cache.diff(&last_cache);
 
     // Apply changes to BUCK files
-    changes.apply(&ctx, false);
+    changes.apply(&ctx);
 
     // Flush the new cache
     new_cache.save();

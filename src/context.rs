@@ -10,6 +10,9 @@ pub struct BuckalContext {
     pub nodes_map: HashMap<PackageId, Node>,
     pub packages_map: HashMap<PackageId, Package>,
     pub checksums_map: HashMap<String, Checksum>,
+    // whether to skip merging manual changes in BUCK files
+    pub no_merge: bool,
+    pub separate: bool,
 }
 
 impl BuckalContext {
@@ -41,6 +44,8 @@ impl BuckalContext {
             nodes_map,
             packages_map,
             checksums_map,
+            no_merge: false,
+            separate: false,
         }
     }
 }
