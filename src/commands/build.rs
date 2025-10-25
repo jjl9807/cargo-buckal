@@ -52,9 +52,14 @@ impl BuildArgs {
             || self.all_targets
     }
 
+    /// Check if any target selection flags are set, excluding all_targets
+    pub fn has_other_target_selection(&self) -> bool {
+        self.lib || self.bins || !self.bin.is_empty() || self.examples || !self.example.is_empty()
+    }
+
     /// Validate target selection arguments
     pub fn validate_target_selection(&self) -> Result<(), String> {
-        if self.all_targets && self.has_target_selection() {
+        if self.all_targets && self.has_other_target_selection() {
             return Err(
                 "--all-targets cannot be used with other target selection options".to_string(),
             );
@@ -420,6 +425,19 @@ mod tests {
         };
         assert!(args.validate_target_selection().is_ok());
 
+        // Test valid: only all-targets
+        let args = BuildArgs {
+            release: false,
+            verbose: 0,
+            lib: false,
+            bin: vec![],
+            bins: false,
+            example: vec![],
+            examples: false,
+            all_targets: true,
+        };
+        assert!(args.validate_target_selection().is_ok());
+
         // Test invalid combination: all-targets with other options
         let args = BuildArgs {
             release: false,
@@ -471,6 +489,69 @@ mod tests {
             all_targets: false,
         };
         assert!(args.has_target_selection());
+
+        let args = BuildArgs {
+            release: false,
+            verbose: 0,
+            lib: false,
+            bin: vec![],
+            bins: false,
+            example: vec![],
+            examples: false,
+            all_targets: true,
+        };
+        assert!(args.has_target_selection());
+    }
+
+    #[test]
+    fn test_has_other_target_selection() {
+        let args = BuildArgs {
+            release: false,
+            verbose: 0,
+            lib: false,
+            bin: vec![],
+            bins: false,
+            example: vec![],
+            examples: false,
+            all_targets: false,
+        };
+        assert!(!args.has_other_target_selection());
+
+        let args = BuildArgs {
+            release: false,
+            verbose: 0,
+            lib: true,
+            bin: vec![],
+            bins: false,
+            example: vec![],
+            examples: false,
+            all_targets: false,
+        };
+        assert!(args.has_other_target_selection());
+
+        let args = BuildArgs {
+            release: false,
+            verbose: 0,
+            lib: false,
+            bin: vec!["app".to_string()],
+            bins: false,
+            example: vec![],
+            examples: false,
+            all_targets: false,
+        };
+        assert!(args.has_other_target_selection());
+
+        let args = BuildArgs {
+            release: false,
+            verbose: 0,
+            lib: false,
+            bin: vec![],
+            bins: false,
+            example: vec![],
+            examples: false,
+            all_targets: true,
+        };
+        assert!(!args.has_other_target_selection());
     }
 
     #[test]
@@ -692,6 +773,7 @@ mod tests {
         assert!(args.has_target_selection());
         assert!(args.validate_target_selection().is_ok());
     }
+
     #[test]
     fn test_empty_relative_path() {
         // Test with empty relative path (root directory)
