@@ -164,7 +164,7 @@ pub fn init_buckal_cell(dest: &std::path::Path) -> Result<()> {
     };
     buckal_section.push(format!("  commit_hash = {}", commit_hash));
     let project = buckconfig.new_section("project".to_owned());
-    project.push("  ignore = .git .buckal".to_owned());
+    project.push("  ignore = .git .buckal buck-out target".to_owned());
     buckconfig.save(&dest.join(".buckconfig"))?;
 
     Ok(())
