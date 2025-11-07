@@ -1,8 +1,12 @@
+use std::{fs::OpenOptions, io::Write};
+
 use clap::Parser;
 
 use crate::{
+    RUST_CRATES_ROOT,
+    buck2::Buck2Command,
     buckify::flush_root,
-    bundles::fetch_buckal_cell,
+    bundles::{fetch_buckal_cell, init_buckal_cell, init_modifier},
     cache::BuckalCache,
     context::BuckalContext,
     utils::{UnwrapOrExit, check_buck2_package, ensure_prerequisites},
@@ -16,6 +20,9 @@ pub struct MigrateArgs {
     /// Merge manual edits with generated content
     #[clap(long)]
     pub merge: bool,
+    /// Migrate with buck2 initialized
+    #[clap(long, conflicts_with = "fetch")]
+    pub buck2: bool,
     /// Fetch latest bundles from remote repository
     #[clap(long)]
     pub fetch: bool,
@@ -29,7 +36,9 @@ pub fn execute(args: &MigrateArgs) {
     ensure_prerequisites().unwrap_or_exit();
 
     // Check if the current directory is a valid Buck2 package
-    check_buck2_package().unwrap_or_exit();
+    if !args.buck2 {
+        check_buck2_package().unwrap_or_exit();
+    }
 
     // get cargo metadata and generate context
     let mut ctx = BuckalContext::new();
@@ -40,6 +49,28 @@ pub fn execute(args: &MigrateArgs) {
     if args.fetch {
         let cwd = std::env::current_dir().unwrap_or_exit();
         fetch_buckal_cell(&cwd).unwrap_or_exit();
+    }
+
+    // Initialize Buck2 project if requested
+    // Compared to `cargo buckal init`, here we only setup Buck2 related files
+    if args.buck2 {
+        Buck2Command::init().execute().unwrap_or_exit();
+        std::fs::create_dir_all(RUST_CRATES_ROOT)
+            .unwrap_or_exit_ctx("failed to create third-party directory");
+        let mut git_ignore = OpenOptions::new()
+            .create(false)
+            .append(true)
+            .open(".gitignore")
+            .unwrap_or_exit();
+        writeln!(git_ignore, "/buck-out").unwrap_or_exit();
+        writeln!(git_ignore, "/.buckal").unwrap_or_exit();
+
+        // Configure the buckal cell in .buckconfig
+        let cwd = std::env::current_dir().unwrap_or_exit();
+        init_buckal_cell(&cwd).unwrap_or_exit();
+
+        // Init cfg modifiers
+        init_modifier(&cwd).unwrap_or_exit();
     }
 
     // Process the root node

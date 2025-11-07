@@ -83,10 +83,9 @@ pub fn execute(args: &InitArgs) {
             .create(false)
             .append(true)
             .open(".gitignore")
-            .unwrap_or_exit_ctx("failed to open `.gitignore` file");
-        writeln!(git_ignore, "/buck-out")
-            .unwrap_or_exit_ctx("failed to write to `.gitignore` file");
-        writeln!(git_ignore, "/.buckal").unwrap_or_exit_ctx("failed to write to `.gitignore` file");
+            .unwrap_or_exit();
+        writeln!(git_ignore, "/buck-out").unwrap_or_exit();
+        writeln!(git_ignore, "/.buckal").unwrap_or_exit();
 
         // Configure the buckal cell in .buckconfig
         let cwd = std::env::current_dir().unwrap_or_exit();
@@ -98,5 +97,11 @@ pub fn execute(args: &InitArgs) {
         // Create a new buck2 cell
         let _buck =
             std::fs::File::create("BUCK").unwrap_or_exit_ctx("failed to create `BUCK` file");
+    }
+
+    if args.repo {
+        buckal_note!(
+            "You should manually configure a Cargo workspace before running `cargo buckal new <path>` to create packages."
+        );
     }
 }

@@ -87,10 +87,9 @@ pub fn execute(args: &NewArgs) {
             .create(false)
             .append(true)
             .open(format!("{}/.gitignore", args.path))
-            .unwrap_or_exit_ctx("failed to open `.gitignore` file");
-        writeln!(git_ignore, "/buck-out")
-            .unwrap_or_exit_ctx("failed to write to `.gitignore` file");
-        writeln!(git_ignore, "/.buckal").unwrap_or_exit_ctx("failed to write to `.gitignore` file");
+            .unwrap_or_exit();
+        writeln!(git_ignore, "/buck-out").unwrap_or_exit();
+        writeln!(git_ignore, "/.buckal").unwrap_or_exit();
 
         // Configure the buckal cell in .buckconfig
         let cwd = std::env::current_dir().unwrap_or_exit();
