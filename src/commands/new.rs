@@ -5,12 +5,12 @@ use std::{
 };
 
 use clap::Parser;
-use ini::Ini;
 
 use crate::{
     RUST_CRATES_ROOT,
     buck2::Buck2Command,
-    buckal_error, buckal_log, buckal_note, extract_bundles,
+    buckal_error, buckal_log, buckal_note,
+    bundles::{init_buckal_cell, init_modifier},
     utils::{UnwrapOrExit, ensure_prerequisites},
 };
 
@@ -73,9 +73,6 @@ pub fn execute(args: &NewArgs) {
         );
         std::fs::remove_dir_all(format!("{}/src", args.path)).unwrap_or_exit();
         std::fs::remove_file(format!("{}/Cargo.toml", args.path)).unwrap_or_exit();
-        buckal_note!(
-            "You should manually configure a Cargo workspace before running `cargo buckal new <path>` to create packages."
-        );
     }
 
     if args.repo || args.lite {
@@ -90,28 +87,26 @@ pub fn execute(args: &NewArgs) {
             .create(false)
             .append(true)
             .open(format!("{}/.gitignore", args.path))
-            .unwrap_or_exit_ctx("failed to open `.gitignore` file");
-        writeln!(git_ignore, "/buck-out")
-            .unwrap_or_exit_ctx("failed to write to `.gitignore` file");
-        writeln!(git_ignore, "/.buckal").unwrap_or_exit_ctx("failed to write to `.gitignore` file");
+            .unwrap_or_exit();
+        writeln!(git_ignore, "/buck-out").unwrap_or_exit();
+        writeln!(git_ignore, "/.buckal").unwrap_or_exit();
 
         // Configure the buckal cell in .buckconfig
-        let cwd =
-            std::env::current_dir().unwrap_or_exit_ctx("failed to get current working directory");
+        let cwd = std::env::current_dir().unwrap_or_exit();
         let repo_path = cwd.join(&args.path);
-        let mut buck_config = Ini::load_from_file(repo_path.join(".buckconfig"))
-            .unwrap_or_exit_ctx("failed to parse .buckconfig");
-        let cells = buck_config.section_mut(Some("cells")).unwrap();
-        cells.insert("buckal", "buckal");
-        buck_config
-            .write_to_file(repo_path.join(".buckconfig"))
-            .unwrap_or_exit_ctx("failed to write to .buckconfig file");
+        init_buckal_cell(&repo_path).unwrap_or_exit();
 
-        // Extract bundled prelude files
-        extract_bundles(&repo_path).unwrap_or_exit_ctx("failed to extract bundled files");
+        // Init cfg modifiers
+        init_modifier(&repo_path).unwrap_or_exit();
     } else {
         // Create a new buck2 cell
         let _buck = std::fs::File::create(format!("{}/BUCK", args.path))
             .unwrap_or_exit_ctx("failed to create `BUCK` file");
+    }
+
+    if args.repo {
+        buckal_note!(
+            "You should manually configure a Cargo workspace before running `cargo buckal new <path>` to create packages."
+        );
     }
 }

@@ -131,7 +131,7 @@ pub fn buckify_root_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
     for bin_target in &bin_targets {
         let buckal_name = bin_target.name.to_owned();
 
-        let rust_binary = emit_rust_binary(
+        let mut rust_binary = emit_rust_binary(
             &package,
             node,
             &ctx.packages_map,
@@ -139,6 +139,13 @@ pub fn buckify_root_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
             &manifest_dir,
             &buckal_name,
         );
+
+        if lib_targets.iter().any(|l| l.name == bin_target.name) {
+            // Cargo allows `main.rs` to use items from `lib.rs` via the crate's own name by default.
+            rust_binary
+                .deps_mut()
+                .insert(format!(":lib{}", bin_target.name));
+        }
 
         buck_rules.push(Rule::RustBinary(rust_binary));
     }

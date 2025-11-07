@@ -5,12 +5,12 @@ use std::{
 };
 
 use clap::Parser;
-use ini::Ini;
 
 use crate::{
     RUST_CRATES_ROOT,
     buck2::Buck2Command,
-    buckal_error, buckal_log, buckal_note, extract_bundles,
+    buckal_error, buckal_log, buckal_note,
+    bundles::{init_buckal_cell, init_modifier},
     utils::{UnwrapOrExit, ensure_prerequisites},
 };
 
@@ -83,27 +83,25 @@ pub fn execute(args: &InitArgs) {
             .create(false)
             .append(true)
             .open(".gitignore")
-            .unwrap_or_exit_ctx("failed to open `.gitignore` file");
-        writeln!(git_ignore, "/buck-out")
-            .unwrap_or_exit_ctx("failed to write to `.gitignore` file");
-        writeln!(git_ignore, "/.buckal").unwrap_or_exit_ctx("failed to write to `.gitignore` file");
+            .unwrap_or_exit();
+        writeln!(git_ignore, "/buck-out").unwrap_or_exit();
+        writeln!(git_ignore, "/.buckal").unwrap_or_exit();
 
         // Configure the buckal cell in .buckconfig
-        let cwd =
-            std::env::current_dir().unwrap_or_exit_ctx("failed to get current working directory");
-        let mut buck_config = Ini::load_from_file(cwd.join(".buckconfig"))
-            .unwrap_or_exit_ctx("failed to parse .buckconfig");
-        let cells = buck_config.section_mut(Some("cells")).unwrap();
-        cells.insert("buckal", "buckal");
-        buck_config
-            .write_to_file(cwd.join(".buckconfig"))
-            .unwrap_or_exit_ctx("failed to write to .buckconfig file");
+        let cwd = std::env::current_dir().unwrap_or_exit();
+        init_buckal_cell(&cwd).unwrap_or_exit();
 
-        // Extract bundled prelude files
-        extract_bundles(&cwd).unwrap_or_exit_ctx("failed to extract bundled files");
+        // Init cfg modifiers
+        init_modifier(&cwd).unwrap_or_exit();
     } else {
         // Create a new buck2 cell
         let _buck =
             std::fs::File::create("BUCK").unwrap_or_exit_ctx("failed to create `BUCK` file");
+    }
+
+    if args.repo {
+        buckal_note!(
+            "You should manually configure a Cargo workspace before running `cargo buckal new <path>` to create packages."
+        );
     }
 }

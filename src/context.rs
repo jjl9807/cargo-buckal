@@ -44,7 +44,7 @@ impl BuckalContext {
             nodes_map,
             packages_map,
             checksums_map,
-            no_merge: false,
+            no_merge: true,
             separate: false,
         }
     }

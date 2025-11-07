@@ -1,23 +1,32 @@
+use std::{fs::OpenOptions, io::Write};
+
 use clap::Parser;
-use ini::Ini;
 
 use crate::{
+    RUST_CRATES_ROOT,
+    buck2::Buck2Command,
     buckify::flush_root,
+    bundles::{fetch_buckal_cell, init_buckal_cell, init_modifier},
     cache::BuckalCache,
     context::BuckalContext,
-    extract_bundles,
-    utils::{UnwrapOrExit, check_buck2_package, ensure_prerequisites, get_buck2_root},
+    utils::{UnwrapOrExit, check_buck2_package, ensure_prerequisites},
 };
 
 #[derive(Parser, Debug)]
 pub struct MigrateArgs {
+    /// Do not use cached data from previous runs
     #[clap(long, name = "no-cache")]
     pub no_cache: bool,
-    #[clap(long, name = "no-merge")]
-    pub no_merge: bool,
-    /// overwrite bundled prelude files
+    /// Merge manual edits with generated content
     #[clap(long)]
-    pub redist: bool,
+    pub merge: bool,
+    /// Migrate with buck2 initialized
+    #[clap(long, conflicts_with = "fetch")]
+    pub buck2: bool,
+    /// Fetch latest bundles from remote repository
+    #[clap(long)]
+    pub fetch: bool,
+    /// Process first-party crates separately
     #[clap(long)]
     pub separate: bool,
 }
@@ -27,33 +36,41 @@ pub fn execute(args: &MigrateArgs) {
     ensure_prerequisites().unwrap_or_exit();
 
     // Check if the current directory is a valid Buck2 package
-    check_buck2_package().unwrap_or_exit();
+    if !args.buck2 {
+        check_buck2_package().unwrap_or_exit();
+    }
 
     // get cargo metadata and generate context
     let mut ctx = BuckalContext::new();
-    ctx.no_merge = args.no_merge;
+    ctx.no_merge = !args.merge;
     ctx.separate = args.separate;
 
-    // Extract bundled prelude files if `--redist` is set
-    if args.redist {
-        let buck2_root = get_buck2_root().unwrap_or_exit_ctx("failed to get Buck2 project root");
-        if buck2_root.join("buckal").exists() {
-            std::fs::remove_dir_all(buck2_root.join("buckal"))
-                .unwrap_or_exit_ctx("failed to overwrite custom prelude files");
-        }
-        extract_bundles(buck2_root.as_std_path())
-            .unwrap_or_exit_ctx("failed to overwrite custom prelude files");
+    // Fetch latest bundles if requested
+    if args.fetch {
+        let cwd = std::env::current_dir().unwrap_or_exit();
+        fetch_buckal_cell(&cwd).unwrap_or_exit();
+    }
 
-        let mut buck_config = Ini::load_from_file(buck2_root.join(".buckconfig"))
-            .unwrap_or_exit_ctx("failed to parse .buckconfig");
-        let cells = buck_config.section_mut(Some("cells")).unwrap();
-        if cells.contains_key("buckal") {
-            cells.remove("buckal");
-        }
-        cells.insert("buckal".to_string(), "buckal".to_string());
-        buck_config
-            .write_to_file(buck2_root.join(".buckconfig"))
-            .unwrap_or_exit_ctx("failed to update .buckconfig with 'buckal' cell entry");
+    // Initialize Buck2 project if requested
+    // Compared to `cargo buckal init`, here we only setup Buck2 related files
+    if args.buck2 {
+        Buck2Command::init().execute().unwrap_or_exit();
+        std::fs::create_dir_all(RUST_CRATES_ROOT)
+            .unwrap_or_exit_ctx("failed to create third-party directory");
+        let mut git_ignore = OpenOptions::new()
+            .create(false)
+            .append(true)
+            .open(".gitignore")
+            .unwrap_or_exit();
+        writeln!(git_ignore, "/buck-out").unwrap_or_exit();
+        writeln!(git_ignore, "/.buckal").unwrap_or_exit();
+
+        // Configure the buckal cell in .buckconfig
+        let cwd = std::env::current_dir().unwrap_or_exit();
+        init_buckal_cell(&cwd).unwrap_or_exit();
+
+        // Init cfg modifiers
+        init_modifier(&cwd).unwrap_or_exit();
     }
 
     // Process the root node

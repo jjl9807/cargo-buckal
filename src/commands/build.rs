@@ -69,17 +69,14 @@ impl BuildArgs {
 }
 
 pub fn execute(args: &BuildArgs) {
-    // Validate target selection arguments
-    if let Err(e) = args.validate_target_selection() {
-        buckal_error!(e);
-        std::process::exit(1);
-    }
-
     // Ensure all prerequisites are installed before proceeding
     ensure_prerequisites().unwrap_or_exit();
 
     // Check if the current directory is a valid Buck2 package
     check_buck2_package().unwrap_or_exit();
+
+    // Validate target selection arguments
+    args.validate_target_selection().unwrap_or_exit();
 
     // Get the root directory of the Buck2 project
     let buck2_root = get_buck2_root().unwrap_or_exit_ctx("failed to get Buck2 project root");

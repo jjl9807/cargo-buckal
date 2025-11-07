@@ -19,6 +19,7 @@ macro_rules! buckal_log {
             "Creating" => ::colored::Colorize::green($action),
             "Flushing" => ::colored::Colorize::green($action),
             "Removing" => ::colored::Colorize::yellow($action),
+            "Fetching" => ::colored::Colorize::cyan($action),
             _ => ::colored::Colorize::blue($action),
         };
         println!("{:>12} {}", ::colored::Colorize::bold(colored), $msg);
@@ -54,6 +55,23 @@ macro_rules! buckal_note {
         eprintln!(
             "{} {}",
             ::colored::Colorize::bold(note_prefix),
+            format_args!($fmt, $($arg)*)
+        );
+    }};
+}
+
+#[macro_export]
+macro_rules! buckal_warn {
+    ($msg:expr) => {{
+        let warn_prefix = ::colored::Colorize::yellow("warn:");
+        eprintln!("{} {}", ::colored::Colorize::bold(warn_prefix), $msg);
+    }};
+
+    ($fmt:expr, $($arg:tt)*) => {{
+        let warn_prefix = ::colored::Colorize::yellow("warn:");
+        eprintln!(
+            "{} {}",
+            ::colored::Colorize::bold(warn_prefix),
             format_args!($fmt, $($arg)*)
         );
     }};
