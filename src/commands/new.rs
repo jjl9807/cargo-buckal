@@ -89,7 +89,6 @@ pub fn execute(args: &NewArgs) {
             .open(format!("{}/.gitignore", args.path))
             .unwrap_or_exit();
         writeln!(git_ignore, "/buck-out").unwrap_or_exit();
-        writeln!(git_ignore, "/.buckal").unwrap_or_exit();
 
         // Configure the buckal cell in .buckconfig
         let cwd = std::env::current_dir().unwrap_or_exit();
