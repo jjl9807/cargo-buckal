@@ -15,8 +15,8 @@ use serde_json::Value;
 use crate::{
     RUST_CRATES_ROOT,
     buck::{
-        BuildscriptRun, CargoManifest, FileGroup, Glob, HttpArchive, Load, Rule, RustBinary,
-        RustLibrary, RustRule, parse_buck_file, patch_buck_rules,
+        BuildscriptRun, CargoManifest, CargoTargetKind, FileGroup, Glob, HttpArchive, Load, Rule,
+        RustBinary, RustLibrary, RustRule, RustTest, parse_buck_file, patch_buck_rules,
     },
     buck2::Buck2Command,
     buckal_log,
@@ -116,6 +116,12 @@ pub fn buckify_root_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
         })
         .collect::<Vec<_>>();
 
+    let test_targets = package
+        .targets
+        .iter()
+        .filter(|t| t.kind.contains(&cargo_metadata::TargetKind::Test))
+        .collect::<Vec<_>>();
+
     let mut buck_rules: Vec<Rule> = Vec::new();
 
     let manifest_dir = package.manifest_path.parent().unwrap().to_owned();
@@ -151,7 +157,7 @@ pub fn buckify_root_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
     }
 
     // emit buck rules for lib targets
-    for lib_target in lib_targets {
+    for lib_target in &lib_targets {
         let buckal_name = if bin_targets.iter().any(|b| b.name == lib_target.name) {
             format!("lib{}", lib_target.name)
         } else {
@@ -168,6 +174,55 @@ pub fn buckify_root_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
         );
 
         buck_rules.push(Rule::RustLibrary(rust_library));
+
+        if lib_target.test {
+            // If the library target has inline tests, emit a rust_test rule for it
+            let buckal_name = format!("{}-unittest", lib_target.name);
+
+            let rust_test = emit_rust_test(
+                &package,
+                node,
+                &ctx.packages_map,
+                lib_target,
+                &manifest_dir,
+                &buckal_name,
+            );
+
+            buck_rules.push(Rule::RustTest(rust_test));
+        }
+    }
+
+    // emit buck rules for integration test
+    for test_target in &test_targets {
+        let buckal_name = test_target.name.to_owned();
+
+        let mut rust_test = emit_rust_test(
+            &package,
+            node,
+            &ctx.packages_map,
+            test_target,
+            &manifest_dir,
+            &buckal_name,
+        );
+
+        let package_name = package.name.replace("-", "_");
+        let mut lib_alias = false;
+        if bin_targets.iter().any(|b| b.name == package_name) {
+            lib_alias = true;
+            rust_test.env_mut().insert(
+                format!("CARGO_BIN_EXE_{}", package_name),
+                format!("$(location :{})", package_name),
+            );
+        }
+        if lib_targets.iter().any(|l| l.name == package_name) {
+            if lib_alias {
+                rust_test.deps_mut().insert(format!(":lib{}", package_name));
+            } else {
+                rust_test.deps_mut().insert(format!(":{}", package_name));
+            }
+        }
+
+        buck_rules.push(Rule::RustTest(rust_test));
     }
 
     // Check if the package has a build script
@@ -263,14 +318,15 @@ fn set_deps(
     rust_rule: &mut dyn RustRule,
     node: &Node,
     packages_map: &HashMap<PackageId, Package>,
-    is_build_script: bool,
+    kind: CargoTargetKind,
 ) {
     for dep in &node.deps {
         if let Some(dep_package) = packages_map.get(&dep.pkg) {
             let dep_package_name = dep_package.name.to_string();
             if dep.dep_kinds.iter().any(|dk| {
-                (!is_build_script && dk.kind == DependencyKind::Normal
-                    || is_build_script && dk.kind == DependencyKind::Build)
+                (kind != CargoTargetKind::CustomBuild && dk.kind == DependencyKind::Normal
+                    || kind == CargoTargetKind::CustomBuild && dk.kind == DependencyKind::Build
+                    || kind == CargoTargetKind::Test && dk.kind == DependencyKind::Development)
                     && check_dep_target(dk)
             }) {
                 // Normal dependencies and build dependencies for `build.rs` on current arch
@@ -359,7 +415,7 @@ fn set_deps(
     }
 }
 
-/// Emit `cargo.rust_library` rule for the given lib target
+/// Emit `rust_library` rule for the given lib target
 fn emit_rust_library(
     package: &Package,
     node: &Node,
@@ -400,12 +456,12 @@ fn emit_rust_library(
     );
 
     // Set dependencies
-    set_deps(&mut rust_library, node, packages_map, false);
+    set_deps(&mut rust_library, node, packages_map, CargoTargetKind::Lib);
 
     rust_library
 }
 
-/// Emit `cargo.rust_binary` rule for the given bin target
+/// Emit `rust_binary` rule for the given bin target
 fn emit_rust_binary(
     package: &Package,
     node: &Node,
@@ -439,9 +495,48 @@ fn emit_rust_binary(
     );
 
     // Set dependencies
-    set_deps(&mut rust_binary, node, packages_map, false);
+    set_deps(&mut rust_binary, node, packages_map, CargoTargetKind::Bin);
 
     rust_binary
+}
+
+/// Emit `rust_test` rule for the given bin target
+fn emit_rust_test(
+    package: &Package,
+    node: &Node,
+    packages_map: &HashMap<PackageId, Package>,
+    test_target: &Target,
+    manifest_dir: &Utf8PathBuf,
+    buckal_name: &str,
+) -> RustTest {
+    let mut rust_test = RustTest {
+        name: buckal_name.to_owned(),
+        srcs: Set::from([get_vendor_target(package)]),
+        crate_name: test_target.name.to_owned().replace("-", "_"),
+        edition: package.edition.to_string(),
+        features: Set::from_iter(node.features.iter().map(|f| f.to_string())),
+        rustc_flags: Set::from([format!(
+            "@$(location :{}-manifest[env_flags])",
+            package.name
+        )]),
+        visibility: Set::from(["PUBLIC".to_owned()]),
+        ..Default::default()
+    };
+
+    // Set the crate root path
+    rust_test.crate_root = format!(
+        "vendor/{}",
+        test_target
+            .src_path
+            .to_owned()
+            .strip_prefix(manifest_dir)
+            .expect("Failed to get binary source path")
+    );
+
+    // Set dependencies
+    set_deps(&mut rust_test, node, packages_map, CargoTargetKind::Test);
+
+    rust_test
 }
 
 /// Emit `buildscript_build` rule for the given build target
@@ -477,7 +572,12 @@ fn emit_buildscript_build(
     );
 
     // Set dependencies for the build script
-    set_deps(&mut buildscript_build, node, packages_map, true);
+    set_deps(
+        &mut buildscript_build,
+        node,
+        packages_map,
+        CargoTargetKind::CustomBuild,
+    );
 
     buildscript_build
 }

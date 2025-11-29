@@ -16,6 +16,7 @@ pub enum Rule {
     CargoManifest(CargoManifest),
     RustLibrary(RustLibrary),
     RustBinary(RustBinary),
+    RustTest(RustTest),
     BuildscriptRun(BuildscriptRun),
 }
 
@@ -34,6 +35,14 @@ pub trait RustRule {
     fn rustc_flags_mut(&mut self) -> &mut Set<String>;
     fn env_mut(&mut self) -> &mut Map<String, String>;
     fn named_deps_mut(&mut self) -> &mut Map<String, String>;
+}
+
+#[derive(PartialEq)]
+pub enum CargoTargetKind {
+    Lib,
+    Bin,
+    CustomBuild,
+    Test,
 }
 
 #[derive(Debug)]
@@ -89,6 +98,28 @@ pub struct RustLibrary {
 #[derive(Serialize, Default, Debug)]
 #[serde(rename = "rust_binary")]
 pub struct RustBinary {
+    pub name: String,
+    pub srcs: Set<String>,
+    #[serde(rename = "crate")]
+    pub crate_name: String,
+    pub crate_root: String,
+    pub edition: String,
+    #[serde(skip_serializing_if = "Map::is_empty")]
+    pub env: Map<String, String>,
+    #[serde(skip_serializing_if = "Set::is_empty")]
+    pub features: Set<String>,
+    #[serde(skip_serializing_if = "Set::is_empty")]
+    pub rustc_flags: Set<String>,
+    #[serde(skip_serializing_if = "Map::is_empty")]
+    pub named_deps: Map<String, String>,
+    pub visibility: Set<String>,
+    #[serde(skip_serializing_if = "Set::is_empty")]
+    pub deps: Set<String>,
+}
+
+#[derive(Serialize, Default, Debug)]
+#[serde(rename = "rust_test")]
+pub struct RustTest {
     pub name: String,
     pub srcs: Set<String>,
     #[serde(rename = "crate")]
@@ -242,6 +273,24 @@ impl RustRule for RustBinary {
     }
 }
 
+impl RustRule for RustTest {
+    fn deps_mut(&mut self) -> &mut Set<String> {
+        &mut self.deps
+    }
+
+    fn rustc_flags_mut(&mut self) -> &mut Set<String> {
+        &mut self.rustc_flags
+    }
+
+    fn env_mut(&mut self) -> &mut Map<String, String> {
+        &mut self.env
+    }
+
+    fn named_deps_mut(&mut self) -> &mut Map<String, String> {
+        &mut self.named_deps
+    }
+}
+
 impl RustLibrary {
     fn from_py_dict(kwargs: &Bound<'_, PyDict>) -> PyResult<Self> {
         let name: String = get_arg(kwargs, "name");
@@ -336,6 +385,64 @@ impl RustBinary {
     }
 
     fn patch_from(&mut self, other: &RustBinary) {
+        // Patch env map
+        for (k, v) in &other.env {
+            self.env.entry(k.clone()).or_insert_with(|| v.clone());
+        }
+        // Patch features set
+        let to_add: Vec<_> = other.features.difference(&self.features).cloned().collect();
+        self.features.extend(to_add);
+        // Patch rustc_flags set
+        let to_add: Vec<_> = other
+            .rustc_flags
+            .difference(&self.rustc_flags)
+            .cloned()
+            .collect();
+        self.rustc_flags.extend(to_add);
+        // Patch visibility set
+        let to_add: Vec<_> = other
+            .visibility
+            .difference(&self.visibility)
+            .cloned()
+            .collect();
+        self.visibility.extend(to_add);
+    }
+}
+
+impl RustTest {
+    fn from_py_dict(kwargs: &Bound<'_, PyDict>) -> PyResult<Self> {
+        let name: String = get_arg(kwargs, "name");
+        let srcs_vec: Vec<String> = get_arg(kwargs, "srcs");
+        let srcs: Set<String> = srcs_vec.into_iter().collect();
+        let crate_name: String = get_arg(kwargs, "crate");
+        let crate_root: String = get_arg(kwargs, "crate_root");
+        let edition: String = get_arg(kwargs, "edition");
+        let env: Map<String, String> = get_arg(kwargs, "env");
+        let features_vec: Vec<String> = get_arg(kwargs, "features");
+        let features: Set<String> = features_vec.into_iter().collect();
+        let rustc_flags_vec: Vec<String> = get_arg(kwargs, "rustc_flags");
+        let rustc_flags: Set<String> = rustc_flags_vec.into_iter().collect();
+        let named_deps: Map<String, String> = get_arg(kwargs, "named_deps");
+        let visibility_vec: Vec<String> = get_arg(kwargs, "visibility");
+        let visibility: Set<String> = visibility_vec.into_iter().collect();
+        let deps_vec: Vec<String> = get_arg(kwargs, "deps");
+        let deps: Set<String> = deps_vec.into_iter().collect();
+        Ok(RustTest {
+            name,
+            srcs,
+            crate_name,
+            crate_root,
+            edition,
+            env,
+            features,
+            rustc_flags,
+            named_deps,
+            visibility,
+            deps,
+        })
+    }
+
+    fn patch_from(&mut self, other: &RustTest) {
         // Patch env map
         for (k, v) in &other.env {
             self.env.entry(k.clone()).or_insert_with(|| v.clone());
@@ -470,6 +577,10 @@ def rust_binary(*args, **kwargs):
     pass
 
 @buckal_call
+def rust_test(*args, **kwargs):
+    pass
+
+@buckal_call
 def buildscript_run(*args, **kwargs):
     pass
 
@@ -528,6 +639,10 @@ def load(*args, **kwargs):
                     let rule = RustBinary::from_py_dict(kwargs)?;
                     buck_rules.insert(func_name.to_string(), Rule::RustBinary(rule));
                 }
+                "rust_test" => {
+                    let rule = RustTest::from_py_dict(kwargs)?;
+                    buck_rules.insert(func_name.to_string(), Rule::RustTest(rule));
+                }
                 "buildscript_run" => {
                     let rule = BuildscriptRun::from_py_dict(kwargs)?;
                     buck_rules.insert(func_name.to_string(), Rule::BuildscriptRun(rule));
@@ -562,6 +677,11 @@ pub fn patch_buck_rules(existing: &Map<String, Rule>, to_patch: &mut [Rule]) {
             }
             Rule::RustBinary(new_rule) => {
                 if let Some(Rule::RustBinary(existing_rule)) = existing.get("rust_binary") {
+                    new_rule.patch_from(existing_rule);
+                }
+            }
+            Rule::RustTest(new_rule) => {
+                if let Some(Rule::RustTest(existing_rule)) = existing.get("rust_test") {
                     new_rule.patch_from(existing_rule);
                 }
             }
