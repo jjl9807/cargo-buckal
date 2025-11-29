@@ -15,7 +15,7 @@ use crate::cache::BuckalCache;
 macro_rules! buckal_log {
     ($action:expr, $msg:expr) => {{
         let colored = match $action {
-            "Adding" => ::colored::Colorize::cyan($action),
+            "Adding" => ::colored::Colorize::green($action),
             "Creating" => ::colored::Colorize::green($action),
             "Flushing" => ::colored::Colorize::green($action),
             "Removing" => ::colored::Colorize::yellow($action),
@@ -359,12 +359,8 @@ pub fn get_cfgs() -> Vec<Cfg> {
         .collect()
 }
 
-pub fn get_cache_dir() -> io::Result<Utf8PathBuf> {
-    Ok(get_buck2_root()?.join(".buckal"))
-}
-
 pub fn get_cache_path() -> io::Result<Utf8PathBuf> {
-    Ok(get_cache_dir()?.join("cache"))
+    Ok(get_buck2_root()?.join("buckal.snap"))
 }
 
 pub fn get_vendor_dir(name: &str, version: &str) -> io::Result<Utf8PathBuf> {
