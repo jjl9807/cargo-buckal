@@ -175,7 +175,7 @@ pub fn buckify_root_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
 
         buck_rules.push(Rule::RustLibrary(rust_library));
 
-        if lib_target.test {
+        if !ctx.repo_config.ignore_tests && lib_target.test {
             // If the library target has inline tests, emit a rust_test rule for it
             let buckal_name = format!("{}-unittest", lib_target.name);
 
@@ -193,36 +193,38 @@ pub fn buckify_root_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
     }
 
     // emit buck rules for integration test
-    for test_target in &test_targets {
-        let buckal_name = test_target.name.to_owned();
+    if !ctx.repo_config.ignore_tests {
+        for test_target in &test_targets {
+            let buckal_name = test_target.name.to_owned();
 
-        let mut rust_test = emit_rust_test(
-            &package,
-            node,
-            &ctx.packages_map,
-            test_target,
-            &manifest_dir,
-            &buckal_name,
-        );
-
-        let package_name = package.name.replace("-", "_");
-        let mut lib_alias = false;
-        if bin_targets.iter().any(|b| b.name == package_name) {
-            lib_alias = true;
-            rust_test.env_mut().insert(
-                format!("CARGO_BIN_EXE_{}", package_name),
-                format!("$(location :{})", package_name),
+            let mut rust_test = emit_rust_test(
+                &package,
+                node,
+                &ctx.packages_map,
+                test_target,
+                &manifest_dir,
+                &buckal_name,
             );
-        }
-        if lib_targets.iter().any(|l| l.name == package_name) {
-            if lib_alias {
-                rust_test.deps_mut().insert(format!(":lib{}", package_name));
-            } else {
-                rust_test.deps_mut().insert(format!(":{}", package_name));
-            }
-        }
 
-        buck_rules.push(Rule::RustTest(rust_test));
+            let package_name = package.name.replace("-", "_");
+            let mut lib_alias = false;
+            if bin_targets.iter().any(|b| b.name == package_name) {
+                lib_alias = true;
+                rust_test.env_mut().insert(
+                    format!("CARGO_BIN_EXE_{}", package_name),
+                    format!("$(location :{})", package_name),
+                );
+            }
+            if lib_targets.iter().any(|l| l.name == package_name) {
+                if lib_alias {
+                    rust_test.deps_mut().insert(format!(":lib{}", package_name));
+                } else {
+                    rust_test.deps_mut().insert(format!(":{}", package_name));
+                }
+            }
+
+            buck_rules.push(Rule::RustTest(rust_test));
+        }
     }
 
     // Check if the package has a build script

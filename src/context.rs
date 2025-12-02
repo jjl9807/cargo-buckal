@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use cargo_lock::{Checksum, Lockfile};
 use cargo_metadata::{MetadataCommand, Node, Package, PackageId};
 
-use crate::utils::UnwrapOrExit;
+use crate::{config::RepoConfig, utils::UnwrapOrExit};
 
 pub struct BuckalContext {
     pub root: Package,
@@ -13,6 +13,8 @@ pub struct BuckalContext {
     // whether to skip merging manual changes in BUCK files
     pub no_merge: bool,
     pub separate: bool,
+    // repository configuration
+    pub repo_config: RepoConfig,
 }
 
 impl BuckalContext {
@@ -39,6 +41,7 @@ impl BuckalContext {
             .filter(|p| p.checksum.is_some())
             .map(|p| (format!("{}-{}", p.name, p.version), p.checksum.unwrap()))
             .collect::<HashMap<_, _>>();
+        let repo_config = RepoConfig::load();
         Self {
             root,
             nodes_map,
@@ -46,6 +49,7 @@ impl BuckalContext {
             checksums_map,
             no_merge: true,
             separate: false,
+            repo_config,
         }
     }
 }
