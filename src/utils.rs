@@ -380,7 +380,7 @@ pub fn get_last_cache() -> BuckalCache {
             .into_iter()
             .map(|n| (n.id.to_owned(), n))
             .collect::<HashMap<_, _>>();
-        BuckalCache::new(&nodes_map)
+        BuckalCache::new(&nodes_map, &cargo_metadata.workspace_root)
     }
 }
 

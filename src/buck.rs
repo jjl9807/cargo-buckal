@@ -80,6 +80,12 @@ pub struct RustLibrary {
     pub crate_name: String,
     pub crate_root: String,
     pub edition: String,
+    #[serde(skip_serializing_if = "Set::is_empty")]
+    pub target_compatible_with: Set<String>,
+    #[serde(skip_serializing_if = "Set::is_empty")]
+    pub compatible_with: Set<String>,
+    #[serde(skip_serializing_if = "Set::is_empty")]
+    pub exec_compatible_with: Set<String>,
     #[serde(skip_serializing_if = "Map::is_empty")]
     pub env: Map<String, String>,
     #[serde(skip_serializing_if = "Set::is_empty")]
@@ -104,6 +110,12 @@ pub struct RustBinary {
     pub crate_name: String,
     pub crate_root: String,
     pub edition: String,
+    #[serde(skip_serializing_if = "Set::is_empty")]
+    pub target_compatible_with: Set<String>,
+    #[serde(skip_serializing_if = "Set::is_empty")]
+    pub compatible_with: Set<String>,
+    #[serde(skip_serializing_if = "Set::is_empty")]
+    pub exec_compatible_with: Set<String>,
     #[serde(skip_serializing_if = "Map::is_empty")]
     pub env: Map<String, String>,
     #[serde(skip_serializing_if = "Set::is_empty")]
@@ -126,6 +138,12 @@ pub struct RustTest {
     pub crate_name: String,
     pub crate_root: String,
     pub edition: String,
+    #[serde(skip_serializing_if = "Set::is_empty")]
+    pub target_compatible_with: Set<String>,
+    #[serde(skip_serializing_if = "Set::is_empty")]
+    pub compatible_with: Set<String>,
+    #[serde(skip_serializing_if = "Set::is_empty")]
+    pub exec_compatible_with: Set<String>,
     #[serde(skip_serializing_if = "Map::is_empty")]
     pub env: Map<String, String>,
     #[serde(skip_serializing_if = "Set::is_empty")]
@@ -291,31 +309,35 @@ impl RustRule for RustTest {
     }
 }
 
+macro_rules! extract_set {
+    ($kwargs:expr, $key:literal) => {{
+        let vec: Vec<String> = get_arg($kwargs, $key);
+        vec.into_iter().collect::<Set<String>>()
+    }};
+}
+
 impl RustLibrary {
     fn from_py_dict(kwargs: &Bound<'_, PyDict>) -> PyResult<Self> {
         let name: String = get_arg(kwargs, "name");
-        let srcs_vec: Vec<String> = get_arg(kwargs, "srcs");
-        let srcs: Set<String> = srcs_vec.into_iter().collect();
+        let srcs: Set<String> = extract_set!(kwargs, "srcs");
         let crate_name: String = get_arg(kwargs, "crate");
         let crate_root: String = get_arg(kwargs, "crate_root");
         let edition: String = get_arg(kwargs, "edition");
+        let compatible_with: Set<String> = extract_set!(kwargs, "compatible_with");
         let env: Map<String, String> = get_arg(kwargs, "env");
-        let features_vec: Vec<String> = get_arg(kwargs, "features");
-        let features: Set<String> = features_vec.into_iter().collect();
-        let rustc_flags_vec: Vec<String> = get_arg(kwargs, "rustc_flags");
-        let rustc_flags: Set<String> = rustc_flags_vec.into_iter().collect();
+        let features: Set<String> = extract_set!(kwargs, "features");
+        let rustc_flags: Set<String> = extract_set!(kwargs, "rustc_flags");
         let proc_macro: Option<bool> = get_arg(kwargs, "proc_macro");
         let named_deps: Map<String, String> = get_arg(kwargs, "named_deps");
-        let visibility_vec: Vec<String> = get_arg(kwargs, "visibility");
-        let visibility: Set<String> = visibility_vec.into_iter().collect();
-        let deps_vec: Vec<String> = get_arg(kwargs, "deps");
-        let deps: Set<String> = deps_vec.into_iter().collect();
+        let visibility: Set<String> = extract_set!(kwargs, "visibility");
+        let deps: Set<String> = extract_set!(kwargs, "deps");
         Ok(RustLibrary {
             name,
             srcs,
             crate_name,
             crate_root,
             edition,
+            compatible_with,
             env,
             features,
             rustc_flags,
@@ -323,6 +345,7 @@ impl RustLibrary {
             named_deps,
             visibility,
             deps,
+            ..Default::default()
         })
     }
 
@@ -354,33 +377,31 @@ impl RustLibrary {
 impl RustBinary {
     fn from_py_dict(kwargs: &Bound<'_, PyDict>) -> PyResult<Self> {
         let name: String = get_arg(kwargs, "name");
-        let srcs_vec: Vec<String> = get_arg(kwargs, "srcs");
-        let srcs: Set<String> = srcs_vec.into_iter().collect();
+        let srcs: Set<String> = extract_set!(kwargs, "srcs");
         let crate_name: String = get_arg(kwargs, "crate");
         let crate_root: String = get_arg(kwargs, "crate_root");
         let edition: String = get_arg(kwargs, "edition");
+        let compatible_with: Set<String> = extract_set!(kwargs, "compatible_with");
         let env: Map<String, String> = get_arg(kwargs, "env");
-        let features_vec: Vec<String> = get_arg(kwargs, "features");
-        let features: Set<String> = features_vec.into_iter().collect();
-        let rustc_flags_vec: Vec<String> = get_arg(kwargs, "rustc_flags");
-        let rustc_flags: Set<String> = rustc_flags_vec.into_iter().collect();
+        let features: Set<String> = extract_set!(kwargs, "features");
+        let rustc_flags: Set<String> = extract_set!(kwargs, "rustc_flags");
         let named_deps: Map<String, String> = get_arg(kwargs, "named_deps");
-        let visibility_vec: Vec<String> = get_arg(kwargs, "visibility");
-        let visibility: Set<String> = visibility_vec.into_iter().collect();
-        let deps_vec: Vec<String> = get_arg(kwargs, "deps");
-        let deps: Set<String> = deps_vec.into_iter().collect();
+        let visibility: Set<String> = extract_set!(kwargs, "visibility");
+        let deps: Set<String> = extract_set!(kwargs, "deps");
         Ok(RustBinary {
             name,
             srcs,
             crate_name,
             crate_root,
             edition,
+            compatible_with,
             env,
             features,
             rustc_flags,
             named_deps,
             visibility,
             deps,
+            ..Default::default()
         })
     }
 
@@ -412,33 +433,31 @@ impl RustBinary {
 impl RustTest {
     fn from_py_dict(kwargs: &Bound<'_, PyDict>) -> PyResult<Self> {
         let name: String = get_arg(kwargs, "name");
-        let srcs_vec: Vec<String> = get_arg(kwargs, "srcs");
-        let srcs: Set<String> = srcs_vec.into_iter().collect();
+        let srcs: Set<String> = extract_set!(kwargs, "srcs");
         let crate_name: String = get_arg(kwargs, "crate");
         let crate_root: String = get_arg(kwargs, "crate_root");
         let edition: String = get_arg(kwargs, "edition");
+        let compatible_with: Set<String> = extract_set!(kwargs, "compatible_with");
         let env: Map<String, String> = get_arg(kwargs, "env");
-        let features_vec: Vec<String> = get_arg(kwargs, "features");
-        let features: Set<String> = features_vec.into_iter().collect();
-        let rustc_flags_vec: Vec<String> = get_arg(kwargs, "rustc_flags");
-        let rustc_flags: Set<String> = rustc_flags_vec.into_iter().collect();
+        let features: Set<String> = extract_set!(kwargs, "features");
+        let rustc_flags: Set<String> = extract_set!(kwargs, "rustc_flags");
         let named_deps: Map<String, String> = get_arg(kwargs, "named_deps");
-        let visibility_vec: Vec<String> = get_arg(kwargs, "visibility");
-        let visibility: Set<String> = visibility_vec.into_iter().collect();
-        let deps_vec: Vec<String> = get_arg(kwargs, "deps");
-        let deps: Set<String> = deps_vec.into_iter().collect();
+        let visibility: Set<String> = extract_set!(kwargs, "visibility");
+        let deps: Set<String> = extract_set!(kwargs, "deps");
         Ok(RustTest {
             name,
             srcs,
             crate_name,
             crate_root,
             edition,
+            compatible_with,
             env,
             features,
             rustc_flags,
             named_deps,
             visibility,
             deps,
+            ..Default::default()
         })
     }
 
@@ -473,14 +492,11 @@ impl BuildscriptRun {
         let package_name: String = get_arg(kwargs, "package_name");
         let buildscript_rule: String = get_arg(kwargs, "buildscript_rule");
         let env: Map<String, String> = get_arg(kwargs, "env");
-        let env_srcs_vec: Vec<String> = get_arg(kwargs, "env_srcs");
-        let env_srcs: Set<String> = env_srcs_vec.into_iter().collect();
-        let features_vec: Vec<String> = get_arg(kwargs, "features");
-        let features: Set<String> = features_vec.into_iter().collect();
+        let env_srcs: Set<String> = extract_set!(kwargs, "env_srcs");
+        let features: Set<String> = extract_set!(kwargs, "features");
         let version: String = get_arg(kwargs, "version");
         let manifest_dir: String = get_arg(kwargs, "manifest_dir");
-        let visibility_vec: Vec<String> = get_arg(kwargs, "visibility");
-        let visibility: Set<String> = visibility_vec.into_iter().collect();
+        let visibility: Set<String> = extract_set!(kwargs, "visibility");
         Ok(BuildscriptRun {
             name,
             package_name,

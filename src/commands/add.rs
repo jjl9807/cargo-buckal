@@ -68,8 +68,8 @@ pub fn execute(args: &AddArgs) {
     // Process the root node
     flush_root(&ctx);
 
-    let new_cache = BuckalCache::new(&ctx.nodes_map);
-    let changes = new_cache.diff(&last_cache);
+    let new_cache = BuckalCache::new(&ctx.nodes_map, &ctx.workspace_root);
+    let changes = new_cache.diff(&last_cache, &ctx.workspace_root);
 
     // Apply changes to BUCK files
     changes.apply(&ctx);
