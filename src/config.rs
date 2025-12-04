@@ -2,7 +2,10 @@ use std::{fs, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{buckal_warn, utils::{UnwrapOrExit, get_buck2_root}};
+use crate::{
+    buckal_warn,
+    utils::{UnwrapOrExit, get_buck2_root},
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {

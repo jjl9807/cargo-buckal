@@ -310,12 +310,10 @@ impl RustRule for RustTest {
 }
 
 macro_rules! extract_set {
-    ($kwargs:expr, $key:literal) => {
-        {
-            let vec: Vec<String> = get_arg($kwargs, $key);
-            vec.into_iter().collect::<Set<String>>()
-        }
-    };
+    ($kwargs:expr, $key:literal) => {{
+        let vec: Vec<String> = get_arg($kwargs, $key);
+        vec.into_iter().collect::<Set<String>>()
+    }};
 }
 
 impl RustLibrary {

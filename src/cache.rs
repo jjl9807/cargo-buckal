@@ -49,7 +49,7 @@ impl BuckalHash for Node {
 }
 
 pub trait PackageIdExt {
-    /// ($WORKSPACE) → workspace_root 
+    /// ($WORKSPACE) → workspace_root
     fn resolve(&self, workspace_root: &Utf8PathBuf) -> Self;
 
     /// workspace_root → ($WORKSPACE)
@@ -60,7 +60,10 @@ impl PackageIdExt for PackageId {
     fn resolve(&self, workspace_root: &Utf8PathBuf) -> Self {
         if self.repr.starts_with("path+file://($WORKSPACE)") {
             PackageId {
-                repr: self.repr.clone().replace("($WORKSPACE)", workspace_root.as_str()),
+                repr: self
+                    .repr
+                    .clone()
+                    .replace("($WORKSPACE)", workspace_root.as_str()),
             }
         } else {
             self.clone()
@@ -68,9 +71,15 @@ impl PackageIdExt for PackageId {
     }
 
     fn canonicalize(&self, workspace_root: &Utf8PathBuf) -> Self {
-        if self.repr.starts_with(format!("path+file://{}", workspace_root.as_str()).as_str()) {
+        if self
+            .repr
+            .starts_with(format!("path+file://{}", workspace_root.as_str()).as_str())
+        {
             PackageId {
-                repr: self.repr.clone().replace(workspace_root.as_str(), "($WORKSPACE)"),
+                repr: self
+                    .repr
+                    .clone()
+                    .replace(workspace_root.as_str(), "($WORKSPACE)"),
             }
         } else {
             self.clone()
@@ -125,17 +134,23 @@ impl BuckalCache {
         for (id, fp) in &self.fingerprints {
             if let Some(other_fp) = other.fingerprints.get(id) {
                 if fp != other_fp {
-                    _diff.changes.insert(id.resolve(workspace_root), ChangeType::Changed);
+                    _diff
+                        .changes
+                        .insert(id.resolve(workspace_root), ChangeType::Changed);
                 }
             } else {
                 // new package added in self
-                _diff.changes.insert(id.resolve(workspace_root), ChangeType::Added);
+                _diff
+                    .changes
+                    .insert(id.resolve(workspace_root), ChangeType::Added);
             }
         }
         for id in other.fingerprints.keys() {
             if !self.fingerprints.contains_key(id) {
                 // redundant package removed in self
-                _diff.changes.insert(id.resolve(workspace_root), ChangeType::Removed);
+                _diff
+                    .changes
+                    .insert(id.resolve(workspace_root), ChangeType::Removed);
             }
         }
         _diff
