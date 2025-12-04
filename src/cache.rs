@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use anyhow::{Error, Result, anyhow};
-use cargo_metadata::{Node, PackageId};
+use cargo_metadata::{Node, PackageId, camino::Utf8PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::utils::{UnwrapOrExit, get_cache_path};
@@ -36,15 +36,45 @@ impl<'de> Deserialize<'de> for Fingerprint {
     }
 }
 
-pub trait BuckalExt {
+pub trait BuckalHash {
     fn fingerprint(&self) -> Fingerprint;
 }
 
-impl BuckalExt for Node {
+impl BuckalHash for Node {
     fn fingerprint(&self) -> Fingerprint {
         let encoded = bincode::serde::encode_to_vec(self, bincode::config::standard())
             .expect("Serialization failed");
         Fingerprint(blake3::hash(&encoded).into())
+    }
+}
+
+pub trait PackageIdExt {
+    /// ($WORKSPACE) → workspace_root 
+    fn resolve(&self, workspace_root: &Utf8PathBuf) -> Self;
+
+    /// workspace_root → ($WORKSPACE)
+    fn canonicalize(&self, workspace_root: &Utf8PathBuf) -> Self;
+}
+
+impl PackageIdExt for PackageId {
+    fn resolve(&self, workspace_root: &Utf8PathBuf) -> Self {
+        if self.repr.starts_with("path+file://($WORKSPACE)") {
+            PackageId {
+                repr: self.repr.clone().replace("($WORKSPACE)", workspace_root.as_str()),
+            }
+        } else {
+            self.clone()
+        }
+    }
+
+    fn canonicalize(&self, workspace_root: &Utf8PathBuf) -> Self {
+        if self.repr.starts_with(format!("path+file://{}", workspace_root.as_str()).as_str()) {
+            PackageId {
+                repr: self.repr.clone().replace(workspace_root.as_str(), "($WORKSPACE)"),
+            }
+        } else {
+            self.clone()
+        }
     }
 }
 
@@ -55,10 +85,10 @@ pub struct BuckalCache {
 }
 
 impl BuckalCache {
-    pub fn new(resolve: &HashMap<PackageId, Node>) -> Self {
+    pub fn new(resolve: &HashMap<PackageId, Node>, workspace_root: &Utf8PathBuf) -> Self {
         let fingerprints = resolve
             .iter()
-            .map(|(id, node)| (id.clone(), node.fingerprint()))
+            .map(|(id, node)| (id.canonicalize(workspace_root), node.fingerprint()))
             .collect();
         Self {
             fingerprints,
@@ -90,22 +120,22 @@ impl BuckalCache {
         std::fs::write(cache_path, format!("{}\n{}", comment, content)).unwrap_or_exit();
     }
 
-    pub fn diff(&self, other: &BuckalCache) -> BuckalChange {
+    pub fn diff(&self, other: &BuckalCache, workspace_root: &Utf8PathBuf) -> BuckalChange {
         let mut _diff = BuckalChange::default();
         for (id, fp) in &self.fingerprints {
             if let Some(other_fp) = other.fingerprints.get(id) {
                 if fp != other_fp {
-                    _diff.changes.insert(id.to_owned(), ChangeType::Changed);
+                    _diff.changes.insert(id.resolve(workspace_root), ChangeType::Changed);
                 }
             } else {
                 // new package added in self
-                _diff.changes.insert(id.clone(), ChangeType::Added);
+                _diff.changes.insert(id.resolve(workspace_root), ChangeType::Added);
             }
         }
         for id in other.fingerprints.keys() {
             if !self.fingerprints.contains_key(id) {
                 // redundant package removed in self
-                _diff.changes.insert(id.clone(), ChangeType::Removed);
+                _diff.changes.insert(id.resolve(workspace_root), ChangeType::Removed);
             }
         }
         _diff

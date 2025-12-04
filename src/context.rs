@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use cargo_lock::{Checksum, Lockfile};
-use cargo_metadata::{MetadataCommand, Node, Package, PackageId};
+use cargo_metadata::{MetadataCommand, Node, Package, PackageId, camino::Utf8PathBuf};
 
 use crate::{config::RepoConfig, utils::UnwrapOrExit};
 
@@ -10,6 +10,7 @@ pub struct BuckalContext {
     pub nodes_map: HashMap<PackageId, Node>,
     pub packages_map: HashMap<PackageId, Package>,
     pub checksums_map: HashMap<String, Checksum>,
+    pub workspace_root: Utf8PathBuf,
     // whether to skip merging manual changes in BUCK files
     pub no_merge: bool,
     pub separate: bool,
@@ -47,6 +48,7 @@ impl BuckalContext {
             nodes_map,
             packages_map,
             checksums_map,
+            workspace_root: cargo_metadata.workspace_root.clone(),
             no_merge: true,
             separate: false,
             repo_config,

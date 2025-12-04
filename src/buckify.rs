@@ -715,6 +715,7 @@ impl BuckalChange {
         // This function applies changes to the BUCK files of detected packages in the cache diff, but skips the root package.
         let re = Regex::new(r"^([^+#]+)\+([^#]+)#([^@]+)@([^+#]+)(?:\+(.+))?$")
             .expect("error creating regex");
+        let skip_pattern = format!("path+file://{}", ctx.workspace_root);
 
         for (id, change_type) in &self.changes {
             match change_type {
@@ -775,6 +776,11 @@ impl BuckalChange {
                     }
                 }
                 ChangeType::Removed => {
+                    // Skip workspace_root package
+                    if id.repr.starts_with(skip_pattern.as_str()) {
+                        continue;
+                    }
+
                     let caps = re.captures(&id.repr).expect("Failed to parse package ID");
                     let name = &caps[3];
                     let version = &caps[4];
