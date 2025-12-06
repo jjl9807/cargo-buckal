@@ -760,10 +760,14 @@ impl BuckalChange {
                         let buck_path = vendor_dir.join("BUCK");
                         if buck_path.exists() {
                             // Skip merging manual changes if `--no-merge` is set
-                            if !ctx.no_merge {
+                            if !ctx.no_merge && !ctx.repo_config.patch_fields.is_empty() {
                                 let existing_rules = parse_buck_file(&buck_path)
                                     .expect("Failed to parse existing BUCK file");
-                                patch_buck_rules(&existing_rules, &mut buck_rules);
+                                patch_buck_rules(
+                                    &existing_rules,
+                                    &mut buck_rules,
+                                    &ctx.repo_config.patch_fields,
+                                );
                             }
                         } else {
                             std::fs::File::create(&buck_path).expect("Failed to create BUCK file");

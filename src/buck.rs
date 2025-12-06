@@ -1,11 +1,12 @@
+use std::collections::{BTreeMap as Map, BTreeSet as Set};
+use std::ffi::CString;
+
 use cargo_metadata::camino::Utf8PathBuf;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyString, PyTuple};
 use pyo3_ffi::c_str;
 use serde::ser::{Serialize, SerializeStruct, SerializeTupleStruct, Serializer};
 use serde_derive::Serialize;
-use std::collections::{BTreeMap as Map, BTreeSet as Set};
-use std::ffi::CString;
 
 #[derive(Serialize, Debug)]
 #[serde(untagged)]
@@ -316,6 +317,24 @@ macro_rules! extract_set {
     }};
 }
 
+fn patch_map<K, V>(dst: &mut Map<K, V>, src: &Map<K, V>)
+where
+    K: Clone + Ord,
+    V: Clone,
+{
+    for (k, v) in src {
+        dst.entry(k.clone()).or_insert_with(|| v.clone());
+    }
+}
+
+fn patch_set<T>(dst: &mut Set<T>, src: &Set<T>)
+where
+    T: Clone + Ord,
+{
+    let to_add: Vec<_> = src.difference(dst).cloned().collect();
+    dst.extend(to_add);
+}
+
 impl RustLibrary {
     fn from_py_dict(kwargs: &Bound<'_, PyDict>) -> PyResult<Self> {
         let name: String = get_arg(kwargs, "name");
@@ -323,7 +342,9 @@ impl RustLibrary {
         let crate_name: String = get_arg(kwargs, "crate");
         let crate_root: String = get_arg(kwargs, "crate_root");
         let edition: String = get_arg(kwargs, "edition");
+        let target_compatible_with: Set<String> = extract_set!(kwargs, "target_compatible_with");
         let compatible_with: Set<String> = extract_set!(kwargs, "compatible_with");
+        let exec_compatible_with: Set<String> = extract_set!(kwargs, "exec_compatible_with");
         let env: Map<String, String> = get_arg(kwargs, "env");
         let features: Set<String> = extract_set!(kwargs, "features");
         let rustc_flags: Set<String> = extract_set!(kwargs, "rustc_flags");
@@ -337,7 +358,9 @@ impl RustLibrary {
             crate_name,
             crate_root,
             edition,
+            target_compatible_with,
             compatible_with,
+            exec_compatible_with,
             env,
             features,
             rustc_flags,
@@ -345,32 +368,41 @@ impl RustLibrary {
             named_deps,
             visibility,
             deps,
-            ..Default::default()
         })
     }
 
-    fn patch_from(&mut self, other: &RustLibrary) {
+    fn patch_from(&mut self, other: &RustLibrary, patch_fields: &Set<String>) {
+        // Patch target_compatible_with set
+        if patch_fields.contains("target_compatible_with") {
+            patch_set(
+                &mut self.target_compatible_with,
+                &other.target_compatible_with,
+            );
+        }
+        // Patch compatible_with set
+        if patch_fields.contains("compatible_with") {
+            patch_set(&mut self.compatible_with, &other.compatible_with);
+        }
+        // Patch exec_compatible_with set
+        if patch_fields.contains("exec_compatible_with") {
+            patch_set(&mut self.exec_compatible_with, &other.exec_compatible_with);
+        }
         // Patch env map
-        for (k, v) in &other.env {
-            self.env.entry(k.clone()).or_insert_with(|| v.clone());
+        if patch_fields.contains("env") {
+            patch_map(&mut self.env, &other.env);
         }
         // Patch features set
-        let to_add: Vec<_> = other.features.difference(&self.features).cloned().collect();
-        self.features.extend(to_add);
+        if patch_fields.contains("features") {
+            patch_set(&mut self.features, &other.features);
+        }
         // Patch rustc_flags set
-        let to_add: Vec<_> = other
-            .rustc_flags
-            .difference(&self.rustc_flags)
-            .cloned()
-            .collect();
-        self.rustc_flags.extend(to_add);
+        if patch_fields.contains("rustc_flags") {
+            patch_set(&mut self.rustc_flags, &other.rustc_flags);
+        }
         // Patch visibility set
-        let to_add: Vec<_> = other
-            .visibility
-            .difference(&self.visibility)
-            .cloned()
-            .collect();
-        self.visibility.extend(to_add);
+        if patch_fields.contains("visibility") {
+            patch_set(&mut self.visibility, &other.visibility);
+        }
     }
 }
 
@@ -381,7 +413,9 @@ impl RustBinary {
         let crate_name: String = get_arg(kwargs, "crate");
         let crate_root: String = get_arg(kwargs, "crate_root");
         let edition: String = get_arg(kwargs, "edition");
+        let target_compatible_with: Set<String> = extract_set!(kwargs, "target_compatible_with");
         let compatible_with: Set<String> = extract_set!(kwargs, "compatible_with");
+        let exec_compatible_with: Set<String> = extract_set!(kwargs, "exec_compatible_with");
         let env: Map<String, String> = get_arg(kwargs, "env");
         let features: Set<String> = extract_set!(kwargs, "features");
         let rustc_flags: Set<String> = extract_set!(kwargs, "rustc_flags");
@@ -394,39 +428,50 @@ impl RustBinary {
             crate_name,
             crate_root,
             edition,
+            target_compatible_with,
             compatible_with,
+            exec_compatible_with,
             env,
             features,
             rustc_flags,
             named_deps,
             visibility,
             deps,
-            ..Default::default()
         })
     }
 
-    fn patch_from(&mut self, other: &RustBinary) {
+    fn patch_from(&mut self, other: &RustBinary, patch_fields: &Set<String>) {
+        // Patch target_compatible_with set
+        if patch_fields.contains("target_compatible_with") {
+            patch_set(
+                &mut self.target_compatible_with,
+                &other.target_compatible_with,
+            );
+        }
+        // Patch compatible_with set
+        if patch_fields.contains("compatible_with") {
+            patch_set(&mut self.compatible_with, &other.compatible_with);
+        }
+        // Patch exec_compatible_with set
+        if patch_fields.contains("exec_compatible_with") {
+            patch_set(&mut self.exec_compatible_with, &other.exec_compatible_with);
+        }
         // Patch env map
-        for (k, v) in &other.env {
-            self.env.entry(k.clone()).or_insert_with(|| v.clone());
+        if patch_fields.contains("env") {
+            patch_map(&mut self.env, &other.env);
         }
         // Patch features set
-        let to_add: Vec<_> = other.features.difference(&self.features).cloned().collect();
-        self.features.extend(to_add);
+        if patch_fields.contains("features") {
+            patch_set(&mut self.features, &other.features);
+        }
         // Patch rustc_flags set
-        let to_add: Vec<_> = other
-            .rustc_flags
-            .difference(&self.rustc_flags)
-            .cloned()
-            .collect();
-        self.rustc_flags.extend(to_add);
+        if patch_fields.contains("rustc_flags") {
+            patch_set(&mut self.rustc_flags, &other.rustc_flags);
+        }
         // Patch visibility set
-        let to_add: Vec<_> = other
-            .visibility
-            .difference(&self.visibility)
-            .cloned()
-            .collect();
-        self.visibility.extend(to_add);
+        if patch_fields.contains("visibility") {
+            patch_set(&mut self.visibility, &other.visibility);
+        }
     }
 }
 
@@ -437,7 +482,9 @@ impl RustTest {
         let crate_name: String = get_arg(kwargs, "crate");
         let crate_root: String = get_arg(kwargs, "crate_root");
         let edition: String = get_arg(kwargs, "edition");
+        let target_compatible_with: Set<String> = extract_set!(kwargs, "target_compatible_with");
         let compatible_with: Set<String> = extract_set!(kwargs, "compatible_with");
+        let exec_compatible_with: Set<String> = extract_set!(kwargs, "exec_compatible_with");
         let env: Map<String, String> = get_arg(kwargs, "env");
         let features: Set<String> = extract_set!(kwargs, "features");
         let rustc_flags: Set<String> = extract_set!(kwargs, "rustc_flags");
@@ -450,39 +497,50 @@ impl RustTest {
             crate_name,
             crate_root,
             edition,
+            target_compatible_with,
             compatible_with,
+            exec_compatible_with,
             env,
             features,
             rustc_flags,
             named_deps,
             visibility,
             deps,
-            ..Default::default()
         })
     }
 
-    fn patch_from(&mut self, other: &RustTest) {
+    fn patch_from(&mut self, other: &RustTest, patch_fields: &Set<String>) {
+        // Patch target_compatible_with set
+        if patch_fields.contains("target_compatible_with") {
+            patch_set(
+                &mut self.target_compatible_with,
+                &other.target_compatible_with,
+            );
+        }
+        // Patch compatible_with set
+        if patch_fields.contains("compatible_with") {
+            patch_set(&mut self.compatible_with, &other.compatible_with);
+        }
+        // Patch exec_compatible_with set
+        if patch_fields.contains("exec_compatible_with") {
+            patch_set(&mut self.exec_compatible_with, &other.exec_compatible_with);
+        }
         // Patch env map
-        for (k, v) in &other.env {
-            self.env.entry(k.clone()).or_insert_with(|| v.clone());
+        if patch_fields.contains("env") {
+            patch_map(&mut self.env, &other.env);
         }
         // Patch features set
-        let to_add: Vec<_> = other.features.difference(&self.features).cloned().collect();
-        self.features.extend(to_add);
+        if patch_fields.contains("features") {
+            patch_set(&mut self.features, &other.features);
+        }
         // Patch rustc_flags set
-        let to_add: Vec<_> = other
-            .rustc_flags
-            .difference(&self.rustc_flags)
-            .cloned()
-            .collect();
-        self.rustc_flags.extend(to_add);
+        if patch_fields.contains("rustc_flags") {
+            patch_set(&mut self.rustc_flags, &other.rustc_flags);
+        }
         // Patch visibility set
-        let to_add: Vec<_> = other
-            .visibility
-            .difference(&self.visibility)
-            .cloned()
-            .collect();
-        self.visibility.extend(to_add);
+        if patch_fields.contains("visibility") {
+            patch_set(&mut self.visibility, &other.visibility);
+        }
     }
 }
 
@@ -510,21 +568,19 @@ impl BuildscriptRun {
         })
     }
 
-    fn patch_from(&mut self, other: &BuildscriptRun) {
+    fn patch_from(&mut self, other: &BuildscriptRun, patch_fields: &Set<String>) {
         // Patch env map
-        for (k, v) in &other.env {
-            self.env.entry(k.clone()).or_insert_with(|| v.clone());
+        if patch_fields.contains("env") {
+            patch_map(&mut self.env, &other.env);
         }
         // Patch features set
-        let to_add: Vec<_> = other.features.difference(&self.features).cloned().collect();
-        self.features.extend(to_add);
+        if patch_fields.contains("features") {
+            patch_set(&mut self.features, &other.features);
+        }
         // Patch visibility set
-        let to_add: Vec<_> = other
-            .visibility
-            .difference(&self.visibility)
-            .cloned()
-            .collect();
-        self.visibility.extend(to_add);
+        if patch_fields.contains("visibility") {
+            patch_set(&mut self.visibility, &other.visibility);
+        }
     }
 }
 
@@ -683,27 +739,31 @@ def load(*args, **kwargs):
     })
 }
 
-pub fn patch_buck_rules(existing: &Map<String, Rule>, to_patch: &mut [Rule]) {
+pub fn patch_buck_rules(
+    existing: &Map<String, Rule>,
+    to_patch: &mut [Rule],
+    patch_fields: &Set<String>,
+) {
     for rule in to_patch.iter_mut() {
         match rule {
             Rule::RustLibrary(new_rule) => {
                 if let Some(Rule::RustLibrary(existing_rule)) = existing.get("rust_library") {
-                    new_rule.patch_from(existing_rule);
+                    new_rule.patch_from(existing_rule, patch_fields);
                 }
             }
             Rule::RustBinary(new_rule) => {
                 if let Some(Rule::RustBinary(existing_rule)) = existing.get("rust_binary") {
-                    new_rule.patch_from(existing_rule);
+                    new_rule.patch_from(existing_rule, patch_fields);
                 }
             }
             Rule::RustTest(new_rule) => {
                 if let Some(Rule::RustTest(existing_rule)) = existing.get("rust_test") {
-                    new_rule.patch_from(existing_rule);
+                    new_rule.patch_from(existing_rule, patch_fields);
                 }
             }
             Rule::BuildscriptRun(new_rule) => {
                 if let Some(Rule::BuildscriptRun(existing_rule)) = existing.get("buildscript_run") {
-                    new_rule.patch_from(existing_rule);
+                    new_rule.patch_from(existing_rule, patch_fields);
                 }
             }
             _ => {}
