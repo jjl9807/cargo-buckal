@@ -22,6 +22,7 @@ use crate::{
     buckal_log,
     cache::{BuckalChange, ChangeType},
     context::BuckalContext,
+    platform::lookup_platforms,
     utils::{UnwrapOrExit, get_buck2_root, get_cfgs, get_target, get_vendor_dir},
 };
 
@@ -456,6 +457,11 @@ fn emit_rust_library(
             .strip_prefix(manifest_dir)
             .expect("Failed to get library source path")
     );
+
+    // look up platform compatibility
+    if let Some(platform) = lookup_platforms(&package.name) {
+        rust_library.compatible_with = platform.to_buck();
+    }
 
     // Set dependencies
     set_deps(&mut rust_library, node, packages_map, CargoTargetKind::Lib);

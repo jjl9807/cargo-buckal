@@ -28,3 +28,5 @@ cargo-lock = "10.1.0"
 reqwest = { version = "0.12.24", features = ["json", "blocking"] }
 walkdir = "2.5.0"
 hex = "0.4.3"
+bitflags = "2.10.0"
+phf = { version = "0.13.1", features = ["macros"] }
