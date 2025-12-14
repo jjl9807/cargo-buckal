@@ -1,3 +1,4 @@
+use std::collections::BTreeSet as Set;
 use std::{fs, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -71,6 +72,7 @@ pub struct RepoConfig {
     pub inherit_workspace_deps: bool,
     pub align_cells: bool,
     pub ignore_tests: bool,
+    pub patch_fields: Set<String>,
 }
 
 impl Default for RepoConfig {
@@ -79,6 +81,7 @@ impl Default for RepoConfig {
             inherit_workspace_deps: false,
             align_cells: false,
             ignore_tests: true,
+            patch_fields: Set::new(),
         }
     }
 }
