@@ -891,7 +891,6 @@ pub fn generate_third_party_aliases(ctx: &BuckalContext) {
             actual,
             visibility: ["PUBLIC"].into_iter().map(String::from).collect(),
         };
-
         let rendered = serde_starlark::to_string(&rule).expect("failed to serialize alias");
         writeln!(writer, "{}\n", rendered).expect("write failed");
     }
