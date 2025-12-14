@@ -74,15 +74,14 @@ pub fn execute(args: &MigrateArgs) {
 
     // Process the root node
     flush_root(&ctx);
-
     // Process dep nodes
     let last_cache = if args.no_cache || BuckalCache::load().is_err() {
         BuckalCache::new_empty()
     } else {
         BuckalCache::load().unwrap_or_exit_ctx("failed to load existing cache")
     };
-    let new_cache = BuckalCache::new(&ctx.nodes_map);
-    let changes = new_cache.diff(&last_cache);
+    let new_cache = BuckalCache::new(&ctx.nodes_map, &ctx.workspace_root);
+    let changes = new_cache.diff(&last_cache, &ctx.workspace_root);
 
     // Apply changes to BUCK files
     changes.apply(&ctx);

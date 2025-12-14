@@ -1,6 +1,7 @@
 use std::{
     borrow::Cow,
-    collections::{BTreeSet as Set, HashMap},
+    collections::{BTreeMap, BTreeSet as Set, HashMap},
+    io::{BufWriter, Write},
     path::PathBuf,
     vec,
 };
@@ -11,6 +12,7 @@ use cargo_metadata::{
 use itertools::Itertools;
 use regex::Regex;
 use serde_json::Value;
+use serde::Serialize;
 
 use crate::{
     RUST_CRATES_ROOT,
@@ -24,6 +26,14 @@ use crate::{
     context::BuckalContext,
     utils::{UnwrapOrExit, get_buck2_root, get_cfgs, get_target, get_vendor_dir},
 };
+
+#[derive(Serialize, Debug)]
+#[serde(rename = "alias")]
+struct Alias {
+    name: String,
+    actual: String,
+    visibility: Set<String>,
+}
 
 pub fn buckify_dep_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
     let package = ctx.packages_map.get(&node.id).unwrap().to_owned();
@@ -175,7 +185,7 @@ pub fn buckify_root_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
 
         buck_rules.push(Rule::RustLibrary(rust_library));
 
-        if lib_target.test {
+        if !ctx.repo_config.ignore_tests && lib_target.test {
             // If the library target has inline tests, emit a rust_test rule for it
             let buckal_name = format!("{}-unittest", lib_target.name);
 
@@ -193,36 +203,38 @@ pub fn buckify_root_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
     }
 
     // emit buck rules for integration test
-    for test_target in &test_targets {
-        let buckal_name = test_target.name.to_owned();
+    if !ctx.repo_config.ignore_tests {
+        for test_target in &test_targets {
+            let buckal_name = test_target.name.to_owned();
 
-        let mut rust_test = emit_rust_test(
-            &package,
-            node,
-            &ctx.packages_map,
-            test_target,
-            &manifest_dir,
-            &buckal_name,
-        );
-
-        let package_name = package.name.replace("-", "_");
-        let mut lib_alias = false;
-        if bin_targets.iter().any(|b| b.name == package_name) {
-            lib_alias = true;
-            rust_test.env_mut().insert(
-                format!("CARGO_BIN_EXE_{}", package_name),
-                format!("$(location :{})", package_name),
+            let mut rust_test = emit_rust_test(
+                &package,
+                node,
+                &ctx.packages_map,
+                test_target,
+                &manifest_dir,
+                &buckal_name,
             );
-        }
-        if lib_targets.iter().any(|l| l.name == package_name) {
-            if lib_alias {
-                rust_test.deps_mut().insert(format!(":lib{}", package_name));
-            } else {
-                rust_test.deps_mut().insert(format!(":{}", package_name));
-            }
-        }
 
-        buck_rules.push(Rule::RustTest(rust_test));
+            let package_name = package.name.replace("-", "_");
+            let mut lib_alias = false;
+            if bin_targets.iter().any(|b| b.name == package_name) {
+                lib_alias = true;
+                rust_test.env_mut().insert(
+                    format!("CARGO_BIN_EXE_{}", package_name),
+                    format!("$(location :{})", package_name),
+                );
+            }
+            if lib_targets.iter().any(|l| l.name == package_name) {
+                if lib_alias {
+                    rust_test.deps_mut().insert(format!(":lib{}", package_name));
+                } else {
+                    rust_test.deps_mut().insert(format!(":{}", package_name));
+                }
+            }
+
+            buck_rules.push(Rule::RustTest(rust_test));
+        }
     }
 
     // Check if the package has a build script
@@ -393,21 +405,16 @@ fn set_deps(
                         }
                     }
                 } else {
-                    // third-party dependency
+                    // third-party dependency → use alias
+                    let alias = format!("//third-party/rust:{}", dep_package.name);
+
                     if dep.name != dep_package_name.replace("-", "_") {
                         // renamed dependency
-                        rust_rule.named_deps_mut().insert(
-                            dep.name.clone(),
-                            format!(
-                                "//{RUST_CRATES_ROOT}/{}/{}:{}",
-                                dep_package.name, dep_package.version, dep_package.name
-                            ),
-                        );
+                        rust_rule
+                            .named_deps_mut()
+                            .insert(dep.name.clone(), alias);
                     } else {
-                        rust_rule.deps_mut().insert(format!(
-                            "//{RUST_CRATES_ROOT}/{}/{}:{}",
-                            dep_package.name, dep_package.version, dep_package.name
-                        ));
+                        rust_rule.deps_mut().insert(alias);
                     }
                 }
             }
@@ -713,6 +720,7 @@ impl BuckalChange {
         // This function applies changes to the BUCK files of detected packages in the cache diff, but skips the root package.
         let re = Regex::new(r"^([^+#]+)\+([^#]+)#([^@]+)@([^+#]+)(?:\+(.+))?$")
             .expect("error creating regex");
+        let skip_pattern = format!("path+file://{}", ctx.workspace_root);
 
         for (id, change_type) in &self.changes {
             match change_type {
@@ -773,6 +781,11 @@ impl BuckalChange {
                     }
                 }
                 ChangeType::Removed => {
+                    // Skip workspace_root package
+                    if id.repr.starts_with(skip_pattern.as_str()) {
+                        continue;
+                    }
+
                     let caps = re.captures(&id.repr).expect("Failed to parse package ID");
                     let name = &caps[3];
                     let version = &caps[4];
@@ -806,6 +819,19 @@ pub fn flush_root(ctx: &BuckalContext) {
         .nodes_map
         .get(&ctx.root.id)
         .expect("Root node not found");
+    if ctx.repo_config.inherit_workspace_deps {
+        buckal_log!(
+            "Generating",
+            "third-party alias rules (inherit_workspace_deps=true)"
+        );
+        generate_third_party_aliases(ctx);
+    } else {
+        buckal_log!(
+            "Skipping",
+            "third-party alias generation (inherit_workspace_deps=false)"
+        );
+    }
+
     let cwd = std::env::current_dir().expect("Failed to get current directory");
     let buck_path = Utf8PathBuf::from(cwd.to_str().unwrap()).join("BUCK");
 
@@ -815,4 +841,72 @@ pub fn flush_root(ctx: &BuckalContext) {
     // Generate the BUCK file
     let buck_content = gen_buck_content(&buck_rules);
     std::fs::write(&buck_path, buck_content).expect("Failed to write BUCK file");
+}
+
+pub fn generate_third_party_aliases(ctx: &BuckalContext) {
+    let root = get_buck2_root().expect("failed to get buck2 root");
+    let dir = root.join("third-party/rust");
+    std::fs::create_dir_all(&dir).expect("failed to create third-party/rust dir");
+
+    let buck_file = dir.join("BUCK");
+
+    let mut grouped: BTreeMap<String, Vec<&cargo_metadata::Package>> = BTreeMap::new();
+
+    for (pkg_id, pkg) in &ctx.packages_map {
+    // only workspace members (first-party)
+        if pkg.source.is_some() {
+            continue;
+        }
+
+        let node = match ctx.nodes_map.get(pkg_id) {
+            Some(n) => n,
+            None => continue,
+        };
+
+        for dep in &node.deps {
+            let dep_pkg = ctx.packages_map.get(&dep.pkg).unwrap();
+            if dep_pkg.source.is_some() {
+                grouped
+                    .entry(dep_pkg.name.to_string())
+                    .or_default()
+                    .push(dep_pkg);
+            }
+        }
+    }
+
+    let file = std::fs::File::create(&buck_file)
+        .expect("failed to create third-party/rust/BUCK");
+    let mut writer = BufWriter::new(file);
+
+    writeln!(writer, "# @generated by cargo-buckal\n")
+        .expect("failed to write header");
+
+    for (crate_name, mut versions) in grouped {
+        versions.sort_by(|a, b| a.version.cmp(&b.version));
+        let latest = versions.last().expect("empty version list");
+
+        let actual = format!(
+            "//third-party/rust/crates/{}/{}:{}",
+            crate_name,
+            latest.version,
+            crate_name
+        );
+
+        let rule = Alias {
+            name: crate_name.clone(),
+            actual,
+            visibility: ["PUBLIC"].into_iter().map(String::from).collect(),
+        };
+
+        let rendered =
+            serde_starlark::to_string(&rule).expect("failed to serialize alias");
+        writeln!(writer, "{}\n", rendered).expect("write failed");
+    }
+
+    writer.flush().expect("failed to flush alias rules");
+
+    buckal_log!(
+        "Generated",
+        format!("third-party alias rules at {}", buck_file)
+    );
 }
