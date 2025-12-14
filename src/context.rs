@@ -49,7 +49,7 @@ impl BuckalContext {
             packages_map,
             checksums_map,
             workspace_root: cargo_metadata.workspace_root.clone(),
-            no_merge: true,
+            no_merge: false,
             separate: false,
             repo_config,
         }
