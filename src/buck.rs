@@ -20,7 +20,13 @@ pub enum Rule {
     RustTest(RustTest),
     BuildscriptRun(BuildscriptRun),
 }
-
+#[derive(Serialize, Debug)]
+#[serde(rename = "alias")]
+pub struct Alias {
+    pub name: String,
+    pub actual: String,
+    pub visibility: Set<String>,
+}
 impl Rule {
     pub fn as_rust_rule_mut(&mut self) -> Option<&mut dyn RustRule> {
         match self {

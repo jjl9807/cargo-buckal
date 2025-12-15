@@ -6,12 +6,12 @@ use std::{
     vec,
 };
 
+use crate::buck::Alias;
 use cargo_metadata::{
     DepKindInfo, DependencyKind, Node, Package, PackageId, Target, camino::Utf8PathBuf,
 };
 use itertools::Itertools;
 use regex::Regex;
-use serde::Serialize;
 use serde_json::Value;
 
 use crate::{
@@ -26,14 +26,6 @@ use crate::{
     context::BuckalContext,
     utils::{UnwrapOrExit, get_buck2_root, get_cfgs, get_target, get_vendor_dir},
 };
-
-#[derive(Serialize, Debug)]
-#[serde(rename = "alias")]
-struct Alias {
-    name: String,
-    actual: String,
-    visibility: Set<String>,
-}
 
 pub fn buckify_dep_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
     let package = ctx.packages_map.get(&node.id).unwrap().to_owned();
@@ -68,6 +60,7 @@ pub fn buckify_dep_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
         lib_target,
         &manifest_dir,
         &package.name,
+        ctx,
     );
 
     buck_rules.push(Rule::RustLibrary(rust_library));
@@ -93,6 +86,7 @@ pub fn buckify_dep_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
             node,
             &ctx.packages_map,
             &manifest_dir,
+            ctx,
         );
         buck_rules.push(Rule::RustBinary(buildscript_build));
 
@@ -154,6 +148,7 @@ pub fn buckify_root_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
             bin_target,
             &manifest_dir,
             &buckal_name,
+            ctx,
         );
 
         if lib_targets.iter().any(|l| l.name == bin_target.name) {
@@ -181,6 +176,7 @@ pub fn buckify_root_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
             lib_target,
             &manifest_dir,
             &buckal_name,
+            ctx,
         );
 
         buck_rules.push(Rule::RustLibrary(rust_library));
@@ -196,6 +192,7 @@ pub fn buckify_root_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
                 lib_target,
                 &manifest_dir,
                 &buckal_name,
+                ctx,
             );
 
             buck_rules.push(Rule::RustTest(rust_test));
@@ -214,6 +211,7 @@ pub fn buckify_root_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
                 test_target,
                 &manifest_dir,
                 &buckal_name,
+                ctx,
             );
 
             let package_name = package.name.replace("-", "_");
@@ -258,6 +256,7 @@ pub fn buckify_root_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
             node,
             &ctx.packages_map,
             &manifest_dir,
+            ctx,
         );
         buck_rules.push(Rule::RustBinary(buildscript_build));
 
@@ -331,6 +330,7 @@ fn set_deps(
     node: &Node,
     packages_map: &HashMap<PackageId, Package>,
     kind: CargoTargetKind,
+    ctx: &BuckalContext,
 ) {
     for dep in &node.deps {
         if let Some(dep_package) = packages_map.get(&dep.pkg) {
@@ -405,14 +405,28 @@ fn set_deps(
                         }
                     }
                 } else {
-                    // third-party dependency → use alias
-                    let alias = format!("//third-party/rust:{}", dep_package.name);
+                    // third-party dependency
+
+                    let use_alias =
+                        ctx.repo_config.inherit_workspace_deps && node.id == ctx.root.id;
+
+                    let dep_target = if use_alias {
+                        // only workspace root direct deps use alias
+                        format!("//third-party/rust:{}", dep_package.name)
+                    } else {
+                        // default: concrete crate target
+                        format!(
+                            "//{RUST_CRATES_ROOT}/{}/{}:{}",
+                            dep_package.name, dep_package.version, dep_package.name
+                        )
+                    };
 
                     if dep.name != dep_package_name.replace("-", "_") {
-                        // renamed dependency
-                        rust_rule.named_deps_mut().insert(dep.name.clone(), alias);
+                        rust_rule
+                            .named_deps_mut()
+                            .insert(dep.name.clone(), dep_target);
                     } else {
-                        rust_rule.deps_mut().insert(alias);
+                        rust_rule.deps_mut().insert(dep_target);
                     }
                 }
             }
@@ -428,6 +442,7 @@ fn emit_rust_library(
     lib_target: &Target,
     manifest_dir: &Utf8PathBuf,
     buckal_name: &str,
+    ctx: &BuckalContext,
 ) -> RustLibrary {
     let mut rust_library = RustLibrary {
         name: buckal_name.to_owned(),
@@ -461,8 +476,13 @@ fn emit_rust_library(
     );
 
     // Set dependencies
-    set_deps(&mut rust_library, node, packages_map, CargoTargetKind::Lib);
-
+    set_deps(
+        &mut rust_library,
+        node,
+        packages_map,
+        CargoTargetKind::Lib,
+        ctx,
+    );
     rust_library
 }
 
@@ -474,6 +494,7 @@ fn emit_rust_binary(
     bin_target: &Target,
     manifest_dir: &Utf8PathBuf,
     buckal_name: &str,
+    ctx: &BuckalContext,
 ) -> RustBinary {
     let mut rust_binary = RustBinary {
         name: buckal_name.to_owned(),
@@ -500,8 +521,13 @@ fn emit_rust_binary(
     );
 
     // Set dependencies
-    set_deps(&mut rust_binary, node, packages_map, CargoTargetKind::Bin);
-
+    set_deps(
+        &mut rust_binary,
+        node,
+        packages_map,
+        CargoTargetKind::Bin,
+        ctx,
+    );
     rust_binary
 }
 
@@ -513,6 +539,7 @@ fn emit_rust_test(
     test_target: &Target,
     manifest_dir: &Utf8PathBuf,
     buckal_name: &str,
+    ctx: &BuckalContext,
 ) -> RustTest {
     let mut rust_test = RustTest {
         name: buckal_name.to_owned(),
@@ -539,8 +566,13 @@ fn emit_rust_test(
     );
 
     // Set dependencies
-    set_deps(&mut rust_test, node, packages_map, CargoTargetKind::Test);
-
+    set_deps(
+        &mut rust_test,
+        node,
+        packages_map,
+        CargoTargetKind::Test,
+        ctx,
+    );
     rust_test
 }
 
@@ -551,6 +583,7 @@ fn emit_buildscript_build(
     node: &Node,
     packages_map: &HashMap<PackageId, Package>,
     manifest_dir: &Utf8PathBuf,
+    ctx: &BuckalContext,
 ) -> RustBinary {
     // create the build script rule
     let mut buildscript_build = RustBinary {
@@ -582,6 +615,7 @@ fn emit_buildscript_build(
         node,
         packages_map,
         CargoTargetKind::CustomBuild,
+        ctx,
     );
 
     buildscript_build
@@ -896,7 +930,7 @@ pub fn generate_third_party_aliases(ctx: &BuckalContext) {
             visibility: ["PUBLIC"].into_iter().map(String::from).collect(),
         };
         let rendered = serde_starlark::to_string(&rule).expect("failed to serialize alias");
-        writeln!(writer, "{}\n", rendered).expect("write failed");
+        writeln!(writer, "{}", rendered).expect("write failed");
     }
 
     writer.flush().expect("failed to flush alias rules");
