@@ -24,6 +24,7 @@ use crate::{
     buckal_log,
     cache::{BuckalChange, ChangeType},
     context::BuckalContext,
+    platform::lookup_platforms,
     utils::{UnwrapOrExit, get_buck2_root, get_cfgs, get_target, get_vendor_dir},
 };
 
@@ -475,6 +476,11 @@ fn emit_rust_library(
             .expect("Failed to get library source path")
     );
 
+    // look up platform compatibility
+    if let Some(platform) = lookup_platforms(&package.name) {
+        rust_library.compatible_with = platform.to_buck();
+    }
+
     // Set dependencies
     set_deps(
         &mut rust_library,
@@ -797,7 +803,7 @@ impl BuckalChange {
                         let buck_path = vendor_dir.join("BUCK");
                         if buck_path.exists() {
                             // Skip merging manual changes if `--no-merge` is set
-                            if !ctx.no_merge {
+                            if !ctx.no_merge && !ctx.repo_config.patch_fields.is_empty() {
                                 let existing_rules = parse_buck_file(&buck_path)
                                     .expect("Failed to parse existing BUCK file");
                                 patch_buck_rules(
