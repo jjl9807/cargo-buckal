@@ -198,6 +198,7 @@ dependencies = [
  "serde_json",
  "serde_starlark",
  "toml",
+ "toml_edit",
  "walkdir",
 ]
 
