@@ -74,7 +74,6 @@ pub fn execute(args: &MigrateArgs) {
 
     // Process the root node
     flush_root(&ctx);
-
     // Process dep nodes
     let last_cache = if args.no_cache || BuckalCache::load().is_err() {
         BuckalCache::new_empty()
