@@ -4,7 +4,7 @@ use std::process::{Command, Stdio};
 use anyhow::{Context, Result, anyhow};
 use cargo_metadata::MetadataCommand;
 use clap::Parser;
-use log::debug; 
+use log::debug;
 use toml_edit::{Array, DocumentMut, InlineTable, Item, Table, Value, value};
 
 use crate::buckal_log;
