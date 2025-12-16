@@ -1,6 +1,9 @@
-use std::process::Command;
+use std::process::{Command, Stdio};
 
+use anyhow::{Context, Result, anyhow};
+use cargo_metadata::MetadataCommand;
 use clap::Parser;
+use log::debug;
 
 use crate::{
     buckify::flush_root,
@@ -11,54 +14,67 @@ use crate::{
 
 #[derive(Parser, Debug)]
 pub struct UpdateArgs {
-    #[clap(value_name = "SPEC", num_args = 1..)]
-    packages: Vec<String>,
-    #[arg(long, default_value = "false")]
-    pub recursive: bool,
+    #[clap(value_name = "SPEC", num_args = 0..)]
+    pub packages: Vec<String>,
+
+    #[arg(long, short = 'w')]
+    pub workspace: bool,
+
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 pub fn execute(args: &UpdateArgs) {
-    // Ensure all prerequisites are installed before proceeding
     ensure_prerequisites().unwrap_or_exit();
 
-    // Check if the current directory is a valid Buck2 package
     check_buck2_package().unwrap_or_exit();
 
-    // get last cache
     let last_cache = get_last_cache();
 
-    let mut cargo_cmd = Command::new("cargo");
-    cargo_cmd
-        .arg("update")
-        .args(&args.packages)
-        .stdout(std::process::Stdio::inherit())
-        .stderr(std::process::Stdio::inherit());
-    if args.recursive {
-        cargo_cmd.arg("--recursive");
-    }
+    handle_cargo_update(args).unwrap_or_exit_ctx("failed to execute cargo update");
 
-    // execute the cargo command
-    let status = cargo_cmd
-        .status()
-        .unwrap_or_exit_ctx("failed to execute `cargo update`");
-    if !status.success() {
+    if args.dry_run {
         return;
     }
 
     section("Buckal Console");
 
-    // get cargo metadata and generate context
-    let ctx = BuckalContext::new();
+    debug!("Syncing: Refreshing Cargo metadata...");
+    let _ = MetadataCommand::new().exec();
 
-    // Process the root node
+    let ctx = BuckalContext::new();
     flush_root(&ctx);
 
-    let new_cache = BuckalCache::new(&ctx.nodes_map, &ctx.workspace_root);
-    let changes = new_cache.diff(&last_cache, &ctx.workspace_root);
+    let workspace_root = ctx.root.manifest_path.parent().unwrap().to_path_buf();
+    let new_cache = BuckalCache::new(&ctx.nodes_map, &workspace_root);
+    let changes = new_cache.diff(&last_cache, &workspace_root);
 
-    // Apply changes to BUCK files
     changes.apply(&ctx);
-
-    // Flush the new cache
     new_cache.save();
+}
+
+fn handle_cargo_update(args: &UpdateArgs) -> Result<()> {
+    let mut cargo_cmd = Command::new("cargo");
+    cargo_cmd.arg("update");
+
+    if args.workspace {
+        cargo_cmd.arg("--workspace");
+    }
+
+    if args.dry_run {
+        cargo_cmd.arg("--dry-run");
+    }
+
+    cargo_cmd.args(&args.packages);
+
+    cargo_cmd.stdout(Stdio::inherit()).stderr(Stdio::inherit());
+
+    let status = cargo_cmd
+        .status()
+        .context("failed to execute `cargo update`")?;
+
+    if !status.success() {
+        return Err(anyhow!("cargo update exited with failure status"));
+    }
+    Ok(())
 }
