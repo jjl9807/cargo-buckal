@@ -187,6 +187,7 @@ dependencies = [
  "indoc",
  "inquire",
  "itertools",
+ "log",
  "phf",
  "pyo3",
  "pyo3-ffi",

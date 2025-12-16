@@ -4,6 +4,7 @@ use std::process::{Command, Stdio};
 use anyhow::{Context, Result, anyhow};
 use cargo_metadata::MetadataCommand;
 use clap::Parser;
+use log::debug; // 引入 debug 宏
 use toml_edit::{Array, DocumentMut, InlineTable, Item, Table, Value, value};
 
 use crate::buckal_log;
@@ -18,7 +19,7 @@ use crate::{
 pub struct AddArgs {
     pub package: String,
 
-    #[arg(long)]
+    #[arg(long, short = 'W')]
     pub workspace: bool,
 
     #[arg(long, short = 'F')]
@@ -36,20 +37,24 @@ pub struct AddArgs {
 
 pub fn execute(args: &AddArgs) {
     ensure_prerequisites().unwrap_or_exit();
+
     let last_cache = get_last_cache();
+
     if args.workspace {
+        section("Buckal Console");
         handle_workspace_add(args).unwrap_or_exit_ctx("failed to add workspace dependency");
     } else {
         handle_classic_add(args).unwrap_or_exit_ctx("failed to execute cargo add");
+        section("Buckal Console");
     }
 
-    section("Buckal Console");
+    debug!("Syncing: Refreshing Cargo metadata...");
     let _ = MetadataCommand::new().exec();
+
     let ctx = BuckalContext::new();
     flush_root(&ctx);
 
     let workspace_root = ctx.root.manifest_path.parent().unwrap().to_path_buf();
-
     let new_cache = BuckalCache::new(&ctx.nodes_map, &workspace_root);
     let changes = new_cache.diff(&last_cache, &workspace_root);
 
@@ -84,7 +89,7 @@ fn handle_classic_add(args: &AddArgs) -> Result<()> {
 fn handle_workspace_add(args: &AddArgs) -> Result<()> {
     let metadata = MetadataCommand::new()
         .exec()
-        .context("Failed to fetch cargo metadata. Please check your Cargo.toml syntax.")?;
+        .context("Failed to fetch cargo metadata")?;
 
     let workspace_root = metadata.workspace_root.into_std_path_buf();
     let root_manifest = workspace_root.join("Cargo.toml");
@@ -103,10 +108,14 @@ fn handle_workspace_add(args: &AddArgs) -> Result<()> {
     }
     let ws_deps = workspace_table["dependencies"].as_table_mut().unwrap();
 
-    if ws_deps.contains_key(dep_key) {
-        buckal_log!(
-            "Skipping",
-            format!("Root: {} is already in [workspace.dependencies]", dep_key)
+    if let Some(item) = ws_deps.get(dep_key) {
+        let current_ver = item
+            .as_value()
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        debug!(
+            "Skipping Root: {} is already in workspace (v{})",
+            dep_key, current_ver
         );
     } else {
         let version_to_write = if let Some(v) = version_req {
@@ -115,20 +124,14 @@ fn handle_workspace_add(args: &AddArgs) -> Result<()> {
             fetch_latest_version(name_req)?
         };
 
-        buckal_log!(
-            "Adding",
-            format!("Root: {} = \"{}\"", dep_key, version_to_write)
-        );
+        buckal_log!("Adding", format!("{} v{}", dep_key, version_to_write));
         ws_deps.insert(dep_key, value(version_to_write));
         fs::write(&root_manifest, root_doc.to_string())?;
     }
 
     if current_manifest != root_manifest {
         if !current_manifest.exists() {
-            buckal_log!(
-                "Note",
-                "Current directory is not a crate, only updated Workspace Root."
-            );
+            debug!("Current directory is not a crate, skipping member update.");
             return Ok(());
         }
 
@@ -148,10 +151,7 @@ fn handle_workspace_add(args: &AddArgs) -> Result<()> {
             .context(format!("Failed to parse [{}]", table_key))?;
 
         if deps_table.contains_key(dep_key) {
-            buckal_log!(
-                "Skipping",
-                format!("Member: {} is already in {}", dep_key, table_key)
-            );
+            debug!("Skipping Member: {} is already in {}", dep_key, table_key);
         } else {
             let mut inline_table = InlineTable::new();
             inline_table.insert("workspace", Value::from(true));
@@ -170,22 +170,11 @@ fn handle_workspace_add(args: &AddArgs) -> Result<()> {
                 inline_table.insert("package", Value::from(name_req));
             }
 
-            buckal_log!(
-                "Adding",
-                format!("Member: {} = {{ workspace = true, ... }}", dep_key)
-            );
+            debug!("Adding Member: {} = {{ workspace = true }}", dep_key);
             deps_table.insert(dep_key, value(inline_table));
             fs::write(&current_manifest, member_doc.to_string())?;
         }
     }
-
-    buckal_log!("Syncing", "Refreshing Cargo metadata...");
-    Command::new("cargo")
-        .arg("metadata")
-        .arg("--format-version=1")
-        .stdout(Stdio::null())
-        .stderr(Stdio::inherit())
-        .status()?;
 
     Ok(())
 }
@@ -199,10 +188,7 @@ fn parse_package_spec(spec: &str) -> (&str, Option<&str>) {
 }
 
 fn fetch_latest_version(crate_name: &str) -> Result<String> {
-    buckal_log!(
-        "Querying",
-        format!("Checking latest version for {}...", crate_name)
-    );
+    debug!("Querying: Checking latest version for {}...", crate_name);
     let output = Command::new("cargo")
         .arg("search")
         .arg(crate_name)
@@ -214,13 +200,18 @@ fn fetch_latest_version(crate_name: &str) -> Result<String> {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     for line in stdout.lines() {
-        if line.starts_with(crate_name) {
-            if let Some(start) = line.find('"') {
-                if let Some(end) = line[start + 1..].find('"') {
-                    return Ok(line[start + 1..start + 1 + end].to_string());
-                }
-            }
+        if !line.starts_with(crate_name) {
+            continue;
         }
+
+        let Some(start) = line.find('"') else {
+            continue;
+        };
+        let Some(end) = line[start + 1..].find('"') else {
+            continue;
+        };
+
+        return Ok(line[start + 1..start + 1 + end].to_string());
     }
     Err(anyhow!(
         "Could not determine latest version for {}",
