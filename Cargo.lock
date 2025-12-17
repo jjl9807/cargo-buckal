@@ -187,6 +187,7 @@ dependencies = [
  "indoc",
  "inquire",
  "itertools",
+ "log",
  "phf",
  "pyo3",
  "pyo3-ffi",
@@ -198,6 +199,7 @@ dependencies = [
  "serde_json",
  "serde_starlark",
  "toml",
+ "toml_edit",
  "walkdir",
 ]
 
