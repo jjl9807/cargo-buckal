@@ -38,7 +38,6 @@ pub struct AddArgs {
 pub fn execute(args: &AddArgs) {
     ensure_prerequisites().unwrap_or_exit();
 
-    // Check if the current directory is a valid Buck2 package
     check_buck2_package().unwrap_or_exit();
 
     let last_cache = get_last_cache();

@@ -13,7 +13,7 @@ use crate::{
     buckify::flush_root,
     cache::BuckalCache,
     context::BuckalContext,
-    utils::{UnwrapOrExit, ensure_prerequisites, get_last_cache, section},
+    utils::{UnwrapOrExit, check_buck2_package, ensure_prerequisites, get_last_cache, section},
 };
 
 #[derive(Parser, Debug)]
@@ -33,6 +33,8 @@ pub struct RemoveArgs {
 
 pub fn execute(args: &RemoveArgs) {
     ensure_prerequisites().unwrap_or_exit();
+
+    check_buck2_package().unwrap_or_exit();
 
     let last_cache = get_last_cache();
 
