@@ -6,7 +6,7 @@ use std::{
     vec,
 };
 
-use crate::buck::Alias;
+use crate::{buck::Alias, buckal_error};
 use cargo_metadata::{
     DepKindInfo, DependencyKind, Node, Package, PackageId, Target, camino::Utf8PathBuf,
 };
@@ -353,7 +353,9 @@ fn set_deps(
                     let manifest_dir = manifest_path.parent().unwrap();
                     let relative_path = manifest_dir
                         .strip_prefix(&buck2_root)
-                        .expect("Current directory is not inside the Buck2 project root")
+                        .unwrap_or_exit_ctx(
+                            "Current directory is not inside the Buck2 project root",
+                        )
                         .to_string_lossy();
 
                     let dep_bin_targets = dep_package
@@ -365,11 +367,12 @@ fn set_deps(
                     let dep_lib_targets = get_lib_targets(dep_package);
 
                     if dep_lib_targets.len() != 1 {
-                        panic!(
+                        buckal_error!(
                             "Expected exactly one library target for dependency {}, but found {}",
                             dep_package.name,
                             dep_lib_targets.len()
                         );
+                        std::process::exit(1);
                     }
 
                     let buckal_name = if dep_bin_targets
@@ -857,9 +860,6 @@ pub fn flush_root(ctx: &BuckalContext) {
 
     let cwd = std::env::current_dir().expect("Failed to get current directory");
     let buck_path = Utf8PathBuf::from(cwd.to_str().unwrap()).join("BUCK");
-    if !buck_path.exists() {
-        std::fs::File::create(&buck_path).expect("Failed to create BUCK file");
-    }
 
     // Generate BUCK rules
     let buck_rules = buckify_root_node(root_node, ctx);
