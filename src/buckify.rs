@@ -106,18 +106,7 @@ pub fn buckify_root_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
         .filter(|t| t.kind.contains(&cargo_metadata::TargetKind::Bin))
         .collect::<Vec<_>>();
 
-    let lib_targets = package
-        .targets
-        .iter()
-        .filter(|t| {
-            t.kind.contains(&cargo_metadata::TargetKind::Lib)
-                || t.kind.contains(&cargo_metadata::TargetKind::CDyLib)
-                || t.kind.contains(&cargo_metadata::TargetKind::DyLib)
-                || t.kind.contains(&cargo_metadata::TargetKind::RLib)
-                || t.kind.contains(&cargo_metadata::TargetKind::StaticLib)
-                || t.kind.contains(&cargo_metadata::TargetKind::ProcMacro)
-        })
-        .collect::<Vec<_>>();
+    let lib_targets = get_lib_targets(&package);
 
     let test_targets = package
         .targets
@@ -324,6 +313,21 @@ pub fn check_dep_target(dk: &DepKindInfo) -> bool {
     platform.matches(&target, &cfgs[..])
 }
 
+fn get_lib_targets(package: &Package) -> Vec<&Target> {
+    package
+        .targets
+        .iter()
+        .filter(|t| {
+            t.kind.contains(&cargo_metadata::TargetKind::Lib)
+                || t.kind.contains(&cargo_metadata::TargetKind::CDyLib)
+                || t.kind.contains(&cargo_metadata::TargetKind::DyLib)
+                || t.kind.contains(&cargo_metadata::TargetKind::RLib)
+                || t.kind.contains(&cargo_metadata::TargetKind::StaticLib)
+                || t.kind.contains(&cargo_metadata::TargetKind::ProcMacro)
+        })
+        .collect()
+}
+
 fn set_deps(
     rust_rule: &mut dyn RustRule,
     node: &Node,
@@ -347,13 +351,10 @@ fn set_deps(
                         get_buck2_root().unwrap_or_exit_ctx("failed to get buck2 root");
                     let manifest_path = PathBuf::from(&dep_package.manifest_path);
                     let manifest_dir = manifest_path.parent().unwrap();
-                    let relative = manifest_dir.strip_prefix(&buck2_root).ok();
-
-                    if relative.is_none() {
-                        eprintln!("error: Current directory is not inside the Buck2 project root.");
-                        return;
-                    }
-                    let relative_path = relative.unwrap().to_string_lossy().into_owned();
+                    let relative_path = manifest_dir
+                        .strip_prefix(&buck2_root)
+                        .expect("Current directory is not inside the Buck2 project root")
+                        .to_string_lossy();
 
                     let dep_bin_targets = dep_package
                         .targets
@@ -361,24 +362,13 @@ fn set_deps(
                         .filter(|t| t.kind.contains(&cargo_metadata::TargetKind::Bin))
                         .collect::<Vec<_>>();
 
-                    let dep_lib_targets = dep_package
-                        .targets
-                        .iter()
-                        .filter(|t| {
-                            t.name == dep_package.name.replace("-", "_")
-                                && (t.kind.contains(&cargo_metadata::TargetKind::Lib)
-                                    || t.kind.contains(&cargo_metadata::TargetKind::CDyLib)
-                                    || t.kind.contains(&cargo_metadata::TargetKind::DyLib)
-                                    || t.kind.contains(&cargo_metadata::TargetKind::RLib)
-                                    || t.kind.contains(&cargo_metadata::TargetKind::StaticLib)
-                                    || t.kind.contains(&cargo_metadata::TargetKind::ProcMacro))
-                        })
-                        .collect::<Vec<_>>();
+                    let dep_lib_targets = get_lib_targets(dep_package);
 
                     if dep_lib_targets.len() != 1 {
                         panic!(
-                            "Unable to find exactly one library target for dependency {}",
-                            dep_package.name
+                            "Expected exactly one library target for dependency {}, but found {}",
+                            dep_package.name,
+                            dep_lib_targets.len()
                         );
                     }
 
@@ -863,15 +853,13 @@ pub fn flush_root(ctx: &BuckalContext) {
             "third-party alias rules (inherit_workspace_deps=true)"
         );
         generate_third_party_aliases(ctx);
-    } else {
-        buckal_log!(
-            "Skipping",
-            "third-party alias generation (inherit_workspace_deps=false)"
-        );
     }
 
     let cwd = std::env::current_dir().expect("Failed to get current directory");
     let buck_path = Utf8PathBuf::from(cwd.to_str().unwrap()).join("BUCK");
+    if !buck_path.exists() {
+        std::fs::File::create(&buck_path).expect("Failed to create BUCK file");
+    }
 
     // Generate BUCK rules
     let buck_rules = buckify_root_node(root_node, ctx);
