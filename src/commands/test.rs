@@ -1,6 +1,9 @@
 use crate::{
     buck2::Buck2Command,
-    utils::{UnwrapOrExit, check_buck2_package, ensure_prerequisites, get_buck2_root},
+    utils::{
+        UnwrapOrExit, check_buck2_package, ensure_prerequisites, get_buck2_root, get_target,
+        platform_exists,
+    },
 };
 use anyhow::{Context, Result, anyhow};
 use cargo_metadata::MetadataCommand;
@@ -70,9 +73,9 @@ pub struct TestArgs {
     #[arg(short, long, value_name = "N")]
     pub jobs: Option<usize>,
 
-    /// Build for the target triple
-    #[arg(long, value_name = "TRIPLE")]
-    pub target: Option<String>,
+    /// Build for the target platform (passed to buck2 --target-platforms)
+    #[arg(long, value_name = "PLATFORM")]
+    pub target_platforms: Option<String>,
 
     /// Build artifacts in release mode, with optimizations
     #[arg(short, long)]
@@ -145,8 +148,18 @@ pub fn execute(args: &TestArgs) {
         cmd = cmd.arg("-j").arg(jobs.to_string());
     }
 
-    if let Some(target) = &args.target {
-        cmd = cmd.arg("--target-platforms").arg(target);
+    let target_platforms = if let Some(platform) = &args.target_platforms {
+        Some(platform.clone())
+    } else {
+        let platform = format!("//platforms:{}", get_target());
+        if platform_exists(&platform) {
+            Some(platform)
+        } else {
+            None
+        }
+    };
+    if let Some(platform) = &target_platforms {
+        cmd = cmd.arg("--target-platforms").arg(platform);
     }
 
     if args.release {
