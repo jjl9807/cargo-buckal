@@ -417,7 +417,6 @@ mod tests {
             checksums_map: HashMap::new(),
             workspace_root: Utf8PathBuf::from("/tmp"),
             no_merge: false,
-            separate: false,
         };
 
         let rules = buckify_root_node(&node, &ctx);
@@ -464,7 +463,6 @@ mod tests {
             checksums_map: HashMap::new(),
             workspace_root: Utf8PathBuf::from("/tmp"),
             no_merge: false,
-            separate: false,
         };
 
         let rules = buckify_root_node(&node, &ctx);

@@ -12,10 +12,6 @@ use std::collections::HashSet;
 use std::process::exit;
 
 #[derive(Parser, Debug)]
-#[command(
-    name = "test",
-    about = "Execute all unit and integration tests and build examples of a local package"
-)]
 pub struct TestArgs {
     /// Package to run tests for
     #[arg(short, long, value_name = "SPEC")]
