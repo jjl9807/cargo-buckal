@@ -83,7 +83,8 @@ impl Cli {
                     },
                     None => {
                         // If no subcommand is provided, print help information
-                        // This would not normally be reached because of `arg_required_else_help`
+                        // This is unreachable due to `arg_required_else_help`, but kept as defensive programming
+                        unreachable!("`arg_required_else_help` should prevent this branch")
                     }
                 }
             }

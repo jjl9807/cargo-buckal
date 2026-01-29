@@ -28,9 +28,6 @@ pub struct MigrateArgs {
     /// Fetch latest bundles from remote repository
     #[clap(long)]
     pub fetch: bool,
-    /// Process first-party crates separately
-    #[clap(long)]
-    pub separate: bool,
 }
 
 pub fn execute(args: &MigrateArgs) {
@@ -111,7 +108,6 @@ pub fn execute(args: &MigrateArgs) {
     // get cargo metadata and generate context
     let mut ctx = BuckalContext::new();
     ctx.no_merge = !args.merge;
-    ctx.separate = args.separate;
 
     // Process the root node
     flush_root(&ctx);

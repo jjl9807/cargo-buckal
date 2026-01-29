@@ -38,11 +38,6 @@ impl BuckalChange {
                     if let Some(node) = ctx.nodes_map.get(id) {
                         let package = ctx.packages_map.get(id).unwrap();
 
-                        if ctx.separate && package.source.is_none() {
-                            // Skip first-party packages if `--separate` is set
-                            continue;
-                        }
-
                         buckal_log!(
                             if let ChangeType::Added = change_type {
                                 "Adding"

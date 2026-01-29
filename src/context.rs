@@ -13,7 +13,6 @@ pub struct BuckalContext {
     pub workspace_root: Utf8PathBuf,
     // whether to skip merging manual changes in BUCK files
     pub no_merge: bool,
-    pub separate: bool,
     // repository configuration
     pub repo_config: RepoConfig,
 }
@@ -50,7 +49,6 @@ impl BuckalContext {
             checksums_map,
             workspace_root: cargo_metadata.workspace_root.clone(),
             no_merge: false,
-            separate: false,
             repo_config,
         }
     }
