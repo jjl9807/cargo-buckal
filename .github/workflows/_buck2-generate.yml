@@ -108,12 +108,6 @@ jobs:
           rm -f buckal.snap .buckconfig .buckroot BUCK
           rm -rf third-party toolchains platforms
 
-      - name: Initialize Buck2
-        shell: bash
-        run: |
-          cd "${{ inputs.project_dir || inputs.project_name }}"
-          buck2 init
-
       - name: Configure buckal.toml ignore_tests
         if: inputs.set_ignore_tests_false
         shell: bash
@@ -128,8 +122,7 @@ jobs:
         shell: bash
         run: |
           cd "${{ inputs.project_dir || inputs.project_name || 'cargo-buckal' }}"
-          rm -rf toolchains platforms
-          cargo buckal migrate --buck2
+          cargo buckal migrate --init
 
       - name: Apply patches
         if: inputs.apply_patches

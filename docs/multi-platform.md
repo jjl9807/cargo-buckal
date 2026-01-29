@@ -27,11 +27,21 @@ If a predicate can’t be mapped to `linux`/`macos`/`windows`, cargo-buckal trea
 
 ## Using it
 
-1. Generate BUCK (and initialize Buck2 config on first run):
+1. Generate BUCK files:
+
+   For first-time setup (initializes Buck2 and generates BUCK files):
 
    ```bash
-   cargo buckal migrate --buck2
+   cargo buckal migrate --init
    ```
+
+   For incremental updates (when Buck2 is already initialized):
+
+   ```bash
+   cargo buckal migrate
+   ```
+
+   This regenerates BUCK files based on current `Cargo.toml`/`Cargo.lock` changes without reinitializing Buck2. Use this after adding/removing dependencies or updating `Cargo.lock`.
 
    To update the pinned Buckal bundles revision (the `buckal` cell), rerun with:
 
@@ -59,7 +69,7 @@ If a predicate can’t be mapped to `linux`/`macos`/`windows`, cargo-buckal trea
    buck2 build //... --target-platforms //platforms:x86_64-pc-windows-msvc
    ```
 
-   `cargo buckal migrate --buck2` configures a `buckal` cell (Buckal bundles). The bundles provide sample platforms under `//platforms:*`. You can also use your own platform definitions; any platform you use must include the appropriate OS constraint value (`prelude//os/constraints:windows` in the example above) so `select()` picks up the right `os_deps` branch.
+   `cargo buckal migrate --init` configures a `buckal` cell (Buckal bundles). The bundles provide sample platforms under `//platforms:*`. You can also use your own platform definitions; any platform you use must include the appropriate OS constraint value (`prelude//os/constraints:windows` in the example above) so `select()` picks up the right `os_deps` branch.
 
    If you want to use the bundled toolchain config too, point the `toolchains` cell at it in `.buckconfig`:
 
