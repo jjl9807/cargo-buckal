@@ -1,63 +1,53 @@
 # cargo-buckal
 
-Seamlessly build Cargo packages with Buck2.
+Seamlessly build Cargo projects with Buck2.
 
 ![demo](docs/demo.gif)
 
 ## Install
 
+You can install the latest stable release from crates.io:
+
+```bash
+cargo install cargo-buckal
 ```
+
+To install the latest development version from the active repository:
+
+```bash
 cargo install --git https://github.com/buck2hub/cargo-buckal.git
 ```
 
+> [!NOTE]
+>
+> Buckal requires [Buck2](https://buck2.build/) and [Python3](https://www.python.org/). Please ensure both are installed on your system before proceeding.
+
 ## Usage
 
-Run `cargo buckal --help` for full usage.
+Run `cargo buckal --help` for more information, and visit https://buck2hub.com/docs for comprehensive documentation.
 
 Common commands:
 
-- `cargo buckal init`: initialize a Buck2-enabled workspace in an existing directory
-- `cargo buckal migrate`: migrate an existing Cargo workspace to Buck2 (generate/update BUCK files)
-- `cargo buckal build`: build the current package with Buck2
-- `cargo buckal new|add|remove|update|autoremove`: manage Cargo dependencies
-- `cargo buckal clean`: clean `buck-out` directory
-- `cargo buckal version`: print version information
+- `cargo buckal init|new`: Create a new package or a Buck2 project in the directory.
+- `cargo buckal migrate`: Migrate an existing Cargo project to Buck2 (generate/update BUCK files).
+- `cargo buckal add|remove|update`: Manage dependencies, applying the changes to both `Cargo.toml` and `BUCK` files.
+- `cargo buckal build`: Build the current package with Buck2.
+- `cargo buckal test`: Compile and execute unit and integration tests with Buck2.
+- `cargo buckal clean`: Remove `buck-out` directory.
 
-## Monorepo usage
+## Migrate existing Cargo projects
 
-For monorepos where `Cargo.toml` is not at the repository root, there are two approaches:
-
-### Two-step approach
-
-1. Initialize Buck2 at the repository root:
-
-   ```bash
-   cd /path/to/monorepo
-   cargo buckal init --repo
-   ```
-
-2. Migrate each Rust project from its directory:
-
-   ```bash
-   cd project/my-rust-app
-   cargo buckal migrate
-   ```
-
-### Shortcut approach
-
-Use `--init <path>` to initialize Buck2 at a specified directory while migrating:
+For any Cargo project that builds successfully, you can migrate to Buck2 with zero configuration by running the following command in a valid directory (one containing `Cargo.toml`). Buckal will automatically initialize the Buck2 project configuration and convert the Cargo dependency graph into `BUCK` files.
 
 ```bash
-cd project/my-rust-app
-cargo buckal migrate --init ../..
+cargo buckal migrate --init <repo_root>
 ```
 
-This is equivalent to running `init --repo` at `../..` followed by `migrate` in the current directory.
+This is equivalent to running `cargo buckal init --repo` at `<repo_root>` followed by `cargo buckal migrate` in the current directory.
 
 ## Supported platforms
 
-Platform-aware dependency mapping and bundled sample platforms currently target these Rust tier-1
-host triples:
+Platform-aware dependency mapping and bundled sample platforms currently target these Rust tier-1 host triples:
 
 - Linux: `x86_64-unknown-linux-gnu`
 - Windows: `x86_64-pc-windows-msvc`
@@ -65,9 +55,9 @@ host triples:
 
 ## Multi-platform builds
 
-`cargo buckal migrate` preserves platform-conditional Cargo dependencies by emitting `os_deps`/`os_named_deps` and canonical OS constraints, so the same generated BUCK files can be built for different target platforms without regenerating on each host.
+Buckal preserves platform-conditional Cargo dependencies by emitting `os_deps`/`os_named_deps` and canonical OS constraints, so the same generated BUCK files can be built for different target platforms without regenerating on each host.
 
-See [docs/multi-platform.md](docs/multi-platform.md).
+See https://buck2hub.com/docs/multi-platform.
 
 ## Configuration
 
@@ -100,6 +90,6 @@ prek run --all-files
 
 ## Repos using cargo-buckal
 
-- `rk8s`: https://github.com/rk8s-dev/rk8s
-- `libra`: https://github.com/web3infra-foundation/libra
-- `git-internal`: https://github.com/web3infra-foundation/git-internal
+- [rk8s-dev/rk8s](https://github.com/rk8s-dev/rk8s): A lightweight Kubernetes-compatible container orchestration system written in Rust.
+- [web3infra-foundation/libra](https://github.com/web3infra-foundation/libra): High-performance reimplementation and extension of the core Git engine in Rust, focused on foundational VCS primitives and customizable storage semantics compatible with Git workflows.
+- [web3infra-foundation/git-internal](https://github.com/web3infra-foundation/git-internal): Internal Git infrastructure, experiments, and foundational components for Git-compatible monorepo systems.
