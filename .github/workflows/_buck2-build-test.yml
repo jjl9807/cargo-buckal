@@ -65,6 +65,7 @@ jobs:
       - name: Checkout cargo-buckal (for actions)
         uses: actions/checkout@v6
         with:
+          persist-credentials: false
           path: cargo-buckal
           sparse-checkout: .github/actions
 
@@ -74,6 +75,7 @@ jobs:
       - name: Checkout cargo-buckal (for installation)
         uses: actions/checkout@v6
         with:
+          persist-credentials: false
           path: cargo-buckal-src
 
       # ============================================================

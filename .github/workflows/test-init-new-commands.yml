@@ -38,6 +38,7 @@ jobs:
       - name: Checkout cargo-buckal
         uses: actions/checkout@v6
         with:
+          persist-credentials: false
           path: cargo-buckal
 
       - name: Setup Windows environment
