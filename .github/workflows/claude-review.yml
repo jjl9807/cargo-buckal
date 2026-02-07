@@ -77,13 +77,11 @@ jobs:
         if: ${{ github.event_name == 'pull_request_target' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
           PR_HEAD_OWNER: ${{ github.event.pull_request.head.repo.owner.login }}
           PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.name }}
           REPO_OWNER: ${{ github.repository_owner }}
         run: |
-          PR_NUMBER="$PR_NUMBER"
           HEAD_REF="$PR_HEAD_REF"
           HEAD_OWNER="$PR_HEAD_OWNER"
           HEAD_REPO="$PR_HEAD_REPO"
@@ -113,7 +111,6 @@ jobs:
           HEAD_REF=$(echo "$PR_DATA" | jq -r '.headRefName')
           HEAD_OWNER=$(echo "$PR_DATA" | jq -r '.headRepositoryOwner.login')
           HEAD_REPO=$(echo "$PR_DATA" | jq -r '.headRepository.name')
-          BASE_BRANCH=$(echo "$PR_DATA" | jq -r '.baseRefName')
           CURRENT_OWNER="$REPO_OWNER"
 
           # For forked PRs, temporarily change origin URL to fork repository
