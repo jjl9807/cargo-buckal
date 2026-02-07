@@ -36,7 +36,9 @@ jobs:
     steps:
       - name: Set cargo target dir
         shell: bash
-        run: echo "CARGO_TARGET_DIR=${{ runner.temp }}/cargo-target" >> "$GITHUB_ENV"
+        env:
+          RUNNER_TEMP: ${{ runner.temp }}
+        run: echo "CARGO_TARGET_DIR=$RUNNER_TEMP/cargo-target" >> "$GITHUB_ENV"
 
       - name: Checkout cargo-buckal
         uses: actions/checkout@v6

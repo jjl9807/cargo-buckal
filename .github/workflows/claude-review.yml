@@ -105,16 +105,16 @@ jobs:
         if: ${{ github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+          REPO_OWNER: ${{ github.repository_owner }}
         run: |
-          PR_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
-
           # Fetch PR metadata: head branch name and source repository
-          PR_DATA=$(gh pr view $PR_NUMBER --json headRefName,headRepositoryOwner,headRepository,baseRefName)
+          PR_DATA=$(gh pr view "$PR_NUMBER" --json headRefName,headRepositoryOwner,headRepository,baseRefName)
           HEAD_REF=$(echo "$PR_DATA" | jq -r '.headRefName')
           HEAD_OWNER=$(echo "$PR_DATA" | jq -r '.headRepositoryOwner.login')
           HEAD_REPO=$(echo "$PR_DATA" | jq -r '.headRepository.name')
           BASE_BRANCH=$(echo "$PR_DATA" | jq -r '.baseRefName')
-          CURRENT_OWNER="${{ github.repository_owner }}"
+          CURRENT_OWNER="$REPO_OWNER"
 
           # For forked PRs, temporarily change origin URL to fork repository
           # This allows claude-code-action to fetch the PR branch correctly

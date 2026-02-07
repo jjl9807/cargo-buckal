@@ -64,7 +64,9 @@ jobs:
     steps:
       - name: Set cargo target dir
         shell: bash
-        run: echo "CARGO_TARGET_DIR=${{ runner.temp }}/cargo-target" >> "$GITHUB_ENV"
+        env:
+          RUNNER_TEMP: ${{ runner.temp }}
+        run: echo "CARGO_TARGET_DIR=$RUNNER_TEMP/cargo-target" >> "$GITHUB_ENV"
 
       - name: Checkout cargo-buckal
         uses: actions/checkout@v6
@@ -78,8 +80,12 @@ jobs:
       - name: Clone ${{ inputs.project_name }} ${{ inputs.clone_ref }}
         if: inputs.clone_url != ''
         shell: bash
+        env:
+          CLONE_REF: ${{ inputs.clone_ref }}
+          CLONE_URL: ${{ inputs.clone_url }}
+          PROJECT_DIR: ${{ inputs.project_dir || inputs.project_name }}
         run: |
-          git clone --depth 1 --branch "${{ inputs.clone_ref }}" "${{ inputs.clone_url }}" "${{ inputs.project_dir || inputs.project_name }}"
+          git clone --depth 1 --branch "$CLONE_REF" "$CLONE_URL" "$PROJECT_DIR"
 
       - name: Setup Rust toolchains
         uses: ./cargo-buckal/.github/actions/setup-rust-toolchains
@@ -104,16 +110,20 @@ jobs:
       - name: Clean up existing Buck2/Buckal files
         if: inputs.clean_existing_buck2_and_buckal
         shell: bash
+        env:
+          PROJECT_DIR: ${{ inputs.project_dir || inputs.project_name }}
         run: |
-          cd "${{ inputs.project_dir || inputs.project_name }}"
+          cd "$PROJECT_DIR"
           rm -f buckal.snap .buckconfig .buckroot BUCK
           rm -rf third-party toolchains platforms
 
       - name: Configure buckal.toml ignore_tests
         if: inputs.set_ignore_tests_false
         shell: bash
+        env:
+          PROJECT_DIR: ${{ inputs.project_dir || inputs.project_name }}
         run: |
-          cd "${{ inputs.project_dir || inputs.project_name }}"
+          cd "$PROJECT_DIR"
           touch buckal.toml
           if ! grep -q '^ignore_tests = false$' buckal.toml; then
             echo 'ignore_tests = false' >> buckal.toml
@@ -121,16 +131,21 @@ jobs:
 
       - name: Generate Buck2 files
         shell: bash
+        env:
+          PROJECT_DIR: ${{ inputs.project_dir || inputs.project_name || 'cargo-buckal' }}
         run: |
-          cd "${{ inputs.project_dir || inputs.project_name || 'cargo-buckal' }}"
+          cd "$PROJECT_DIR"
           cargo buckal migrate --init
 
       - name: Apply patches
         if: inputs.apply_patches
         shell: bash
+        env:
+          PROJECT_DIR: ${{ inputs.project_dir || inputs.project_name }}
+          PROJECT_NAME: ${{ inputs.project_name }}
         run: |
-          cd "${{ inputs.project_dir || inputs.project_name }}"
-          PATCH_DIR="../cargo-buckal/.github/patches/${{ inputs.project_name }}"
+          cd "$PROJECT_DIR"
+          PATCH_DIR="../cargo-buckal/.github/patches/$PROJECT_NAME"
           if [[ -d "$PATCH_DIR" ]]; then
             echo "Applying patches from $PATCH_DIR"
             # Apply .patch files
