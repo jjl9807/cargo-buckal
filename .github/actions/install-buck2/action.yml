@@ -16,7 +16,7 @@ runs:
       env:
         INPUT_VERSION: ${{ inputs.version }}
         RUNNER_OS_ARCH: ${{ runner.os }}-${{ runner.arch }}
-      run: |
+      run: | # zizmor: ignore[github-env] writing to GITHUB_PATH is required to make buck2 available in subsequent steps
         # Determine platform
         case "$RUNNER_OS_ARCH" in
           Linux-X64)   PLATFORM="x86_64-unknown-linux-musl" ;;
@@ -48,7 +48,7 @@ runs:
       shell: pwsh
       env:
         INPUT_VERSION: ${{ inputs.version }}
-      run: |
+      run: | # zizmor: ignore[github-env] writing to GITHUB_PATH is required to make buck2 available in subsequent steps
         $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { "$env:USERPROFILE\.cargo" }
         $binDir = "$cargoHome\bin"
         New-Item -ItemType Directory -Force -Path $binDir | Out-Null
