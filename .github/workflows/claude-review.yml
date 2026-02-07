@@ -16,7 +16,7 @@ on:
   pull_request_review:
     types: [submitted]
   # Main trigger for PR events, using pull_request_target for elevated permissions
-  pull_request_target:
+  pull_request_target: # zizmor: ignore[dangerous-triggers] required for write access to post review comments on PRs
     types: [opened, synchronize, reopened]
 
 permissions:
@@ -67,6 +67,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
+          persist-credentials: false
           # Use PR head SHA for pull_request_target, fallback to current SHA otherwise
           fetch-depth: 0
           ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.sha }}
@@ -76,13 +77,11 @@ jobs:
         if: ${{ github.event_name == 'pull_request_target' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
           PR_HEAD_OWNER: ${{ github.event.pull_request.head.repo.owner.login }}
           PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.name }}
           REPO_OWNER: ${{ github.repository_owner }}
         run: |
-          PR_NUMBER="$PR_NUMBER"
           HEAD_REF="$PR_HEAD_REF"
           HEAD_OWNER="$PR_HEAD_OWNER"
           HEAD_REPO="$PR_HEAD_REPO"
@@ -104,16 +103,15 @@ jobs:
         if: ${{ github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+          REPO_OWNER: ${{ github.repository_owner }}
         run: |
-          PR_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
-
           # Fetch PR metadata: head branch name and source repository
-          PR_DATA=$(gh pr view $PR_NUMBER --json headRefName,headRepositoryOwner,headRepository,baseRefName)
+          PR_DATA=$(gh pr view "$PR_NUMBER" --json headRefName,headRepositoryOwner,headRepository,baseRefName)
           HEAD_REF=$(echo "$PR_DATA" | jq -r '.headRefName')
           HEAD_OWNER=$(echo "$PR_DATA" | jq -r '.headRepositoryOwner.login')
           HEAD_REPO=$(echo "$PR_DATA" | jq -r '.headRepository.name')
-          BASE_BRANCH=$(echo "$PR_DATA" | jq -r '.baseRefName')
-          CURRENT_OWNER="${{ github.repository_owner }}"
+          CURRENT_OWNER="$REPO_OWNER"
 
           # For forked PRs, temporarily change origin URL to fork repository
           # This allows claude-code-action to fetch the PR branch correctly

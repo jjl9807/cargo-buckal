@@ -57,7 +57,9 @@ jobs:
     steps:
       - name: Set cargo target dir
         shell: bash
-        run: echo "CARGO_TARGET_DIR=${{ runner.temp }}/cargo-target" >> "$GITHUB_ENV"
+        env:
+          RUNNER_TEMP: ${{ runner.temp }}
+        run: echo "CARGO_TARGET_DIR=$RUNNER_TEMP/cargo-target" >> "$GITHUB_ENV"
 
       # ============================================================
       # Checkout cargo-buckal for reusable actions
@@ -65,6 +67,7 @@ jobs:
       - name: Checkout cargo-buckal (for actions)
         uses: actions/checkout@v6
         with:
+          persist-credentials: false
           path: cargo-buckal
           sparse-checkout: .github/actions
 
@@ -74,6 +77,7 @@ jobs:
       - name: Checkout cargo-buckal (for installation)
         uses: actions/checkout@v6
         with:
+          persist-credentials: false
           path: cargo-buckal-src
 
       # ============================================================
@@ -145,19 +149,27 @@ jobs:
       # ============================================================
       - name: cargo buckal build
         shell: bash
+        env:
+          PROJECT_DIR: ${{ inputs.project_dir || inputs.project_name }}
         run: |
-          cd "${{ inputs.project_dir || inputs.project_name }}"
+          cd "$PROJECT_DIR"
           cargo buckal build --all-targets
       - name: cargo buckal build (--target-platforms)
         shell: bash
+        env:
+          PROJECT_DIR: ${{ inputs.project_dir || inputs.project_name }}
+          TARGET: ${{ matrix.target }}
         run: |
-          cd "${{ inputs.project_dir || inputs.project_name }}"
-          cargo buckal build --all-targets --target-platforms //platforms:${{ matrix.target }}
+          cd "$PROJECT_DIR"
+          cargo buckal build --all-targets --target-platforms "//platforms:$TARGET"
       - name: cargo buckal build (--target)
         shell: bash
+        env:
+          PROJECT_DIR: ${{ inputs.project_dir || inputs.project_name }}
+          TARGET: ${{ matrix.target }}
         run: |
-          cd "${{ inputs.project_dir || inputs.project_name }}"
-          cargo buckal build --all-targets --target ${{ matrix.target }}
+          cd "$PROJECT_DIR"
+          cargo buckal build --all-targets --target "$TARGET"
 
       # ============================================================
       # cargo buckal test
@@ -165,18 +177,26 @@ jobs:
       - name: cargo buckal test
         if: inputs.run_tests
         shell: bash
+        env:
+          PROJECT_DIR: ${{ inputs.project_dir || inputs.project_name }}
         run: |
-          cd "${{ inputs.project_dir || inputs.project_name }}"
+          cd "$PROJECT_DIR"
           cargo buckal test --workspace
       - name: cargo buckal test (--target-platforms)
         if: inputs.run_tests
         shell: bash
+        env:
+          PROJECT_DIR: ${{ inputs.project_dir || inputs.project_name }}
+          TARGET: ${{ matrix.target }}
         run: |
-          cd "${{ inputs.project_dir || inputs.project_name }}"
-          cargo buckal test --workspace --target-platforms //platforms:${{ matrix.target }}
+          cd "$PROJECT_DIR"
+          cargo buckal test --workspace --target-platforms "//platforms:$TARGET"
       - name: cargo buckal test (--target)
         if: inputs.run_tests
         shell: bash
+        env:
+          PROJECT_DIR: ${{ inputs.project_dir || inputs.project_name }}
+          TARGET: ${{ matrix.target }}
         run: |
-          cd "${{ inputs.project_dir || inputs.project_name }}"
-          cargo buckal test --workspace --target ${{ matrix.target }}
+          cd "$PROJECT_DIR"
+          cargo buckal test --workspace --target "$TARGET"

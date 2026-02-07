@@ -13,17 +13,20 @@ runs:
     - name: Install Buck2 (Unix)
       if: runner.os != 'Windows'
       shell: bash
-      run: |
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+        RUNNER_OS_ARCH: ${{ runner.os }}-${{ runner.arch }}
+      run: | # zizmor: ignore[github-env] writing to GITHUB_PATH is required to make buck2 available in subsequent steps
         # Determine platform
-        case "${{ runner.os }}-${{ runner.arch }}" in
+        case "$RUNNER_OS_ARCH" in
           Linux-X64)   PLATFORM="x86_64-unknown-linux-musl" ;;
           Linux-ARM64) PLATFORM="aarch64-unknown-linux-musl" ;;
           macOS-X64)   PLATFORM="x86_64-apple-darwin" ;;
           macOS-ARM64) PLATFORM="aarch64-apple-darwin" ;;
-          *) echo "Unsupported platform: ${{ runner.os }}-${{ runner.arch }}"; exit 1 ;;
+          *) echo "Unsupported platform: $RUNNER_OS_ARCH"; exit 1 ;;
         esac
 
-        VERSION="${{ inputs.version }}"
+        VERSION="$INPUT_VERSION"
         URL="https://github.com/facebook/buck2/releases/download/${VERSION}/buck2-${PLATFORM}.zst"
 
         echo "Downloading buck2 from $URL"
@@ -43,12 +46,14 @@ runs:
     - name: Install Buck2 (Windows)
       if: runner.os == 'Windows'
       shell: pwsh
-      run: |
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+      run: | # zizmor: ignore[github-env] writing to GITHUB_PATH is required to make buck2 available in subsequent steps
         $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { "$env:USERPROFILE\.cargo" }
         $binDir = "$cargoHome\bin"
         New-Item -ItemType Directory -Force -Path $binDir | Out-Null
 
-        $version = "${{ inputs.version }}"
+        $version = "$env:INPUT_VERSION"
         $buck2Url = "https://github.com/facebook/buck2/releases/download/${version}/buck2-x86_64-pc-windows-msvc.exe.zst"
         $zstFile = "$binDir\buck2.exe.zst"
         $buck2Exe = "$binDir\buck2.exe"

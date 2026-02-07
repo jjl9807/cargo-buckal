@@ -17,6 +17,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 env:
   CARGO_TARGET_DIR: ${{ github.workspace }}/cargo-target
 
@@ -40,6 +43,7 @@ jobs:
       - name: Checkout cargo-buckal
         uses: actions/checkout@v6
         with:
+          persist-credentials: false
           path: cargo-buckal
 
       - name: Setup Windows environment
@@ -118,6 +122,7 @@ jobs:
       - name: Checkout cargo-buckal
         uses: actions/checkout@v6
         with:
+          persist-credentials: false
           path: cargo-buckal
 
       - name: Setup Windows environment

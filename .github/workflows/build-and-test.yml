@@ -12,6 +12,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Cargo Build
@@ -22,6 +25,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
+          persist-credentials: false
           submodules: recursive
 
       - name: Setup Rust Toolchain
@@ -42,6 +46,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
+          persist-credentials: false
           submodules: recursive
 
       - name: Run tests
