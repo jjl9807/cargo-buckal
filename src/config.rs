@@ -1,6 +1,9 @@
-use std::collections::BTreeSet as Set;
-use std::{fs, path::PathBuf};
+use std::collections::{BTreeMap as Map, BTreeSet as Set};
+use std::fs::{self, File, OpenOptions};
+use std::io::Write;
+use std::path::PathBuf;
 
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -10,20 +13,64 @@ use crate::{
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    #[serde(default = "default_buck2_binary")]
+    #[serde(
+        default = "default_buck2_binary",
+        skip_serializing_if = "is_default_buck2_binary"
+    )]
     pub buck2_binary: String,
+    #[serde(default, skip_serializing_if = "RegistryDefault::if_skip")]
+    pub registry: RegistryDefault,
+    #[serde(default = "default_registries", skip_serializing_if = "Map::is_empty")]
+    pub registries: Map<String, RegistryEntry>,
+}
+
+fn is_default_buck2_binary(value: &str) -> bool {
+    value == "buck2"
 }
 
 fn default_buck2_binary() -> String {
     "buck2".to_string()
 }
 
+fn default_registries() -> Map<String, RegistryEntry> {
+    let mut registries = Map::new();
+    registries.insert(
+        "buck2hub".to_string(),
+        RegistryEntry {
+            base: "https://hub.buck2hub.com".to_string(),
+            api: "https://git.buck2hub.com".to_string(),
+            token: None,
+        },
+    );
+    registries
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
             buck2_binary: default_buck2_binary(),
+            registry: RegistryDefault::default(),
+            registries: default_registries(),
         }
     }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RegistryDefault {
+    pub default: Option<String>,
+}
+
+impl RegistryDefault {
+    pub fn if_skip(&self) -> bool {
+        self.default.is_none()
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RegistryEntry {
+    pub base: String,
+    pub api: String,
+    pub token: Option<String>,
 }
 
 impl Config {
@@ -56,6 +103,30 @@ impl Config {
         }
     }
 
+    /// Save configuration to ~/.config/buckal/config.toml
+    pub fn save(&self) -> Result<()> {
+        let config_path = Self::config_path();
+        if let Some(parent) = config_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let content = toml::to_string_pretty(self)?;
+
+        // Write with owner-only permissions (0600 on Unix)
+        // Following Cargo's approach: Unix gets 0600, other platforms use default permissions
+        let mut file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&config_path)?;
+
+        file.write_all(content.as_bytes())?;
+
+        // Set permissions after writing (Unix only)
+        set_permissions(&file)?;
+
+        Ok(())
+    }
+
     /// Get the configuration file path
     pub fn config_path() -> PathBuf {
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
@@ -64,6 +135,29 @@ impl Config {
             .join("buckal")
             .join("config.toml")
     }
+
+    /// Get the default registry name, or "buck2hub" if not set
+    pub fn default_registry(&self) -> &str {
+        self.registry.default.as_deref().unwrap_or("buck2hub")
+    }
+}
+
+/// Set file permissions to owner-only (Unix only, following Cargo's approach)
+#[cfg(unix)]
+fn set_permissions(file: &File) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut perms = file.metadata()?.permissions();
+    perms.set_mode(0o600);
+    file.set_permissions(perms)?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn set_permissions(_file: &File) -> Result<()> {
+    // On non-Unix platforms, rely on default file system permissions
+    // This is the same approach used by Cargo
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
