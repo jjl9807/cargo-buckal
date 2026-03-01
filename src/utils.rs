@@ -4,6 +4,9 @@ use cargo_platform::Cfg;
 use colored::Colorize;
 use inquire::Select;
 use std::collections::HashMap;
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::{io, process::Command, str::FromStr};
 
 use crate::RUST_CRATES_ROOT;
@@ -323,6 +326,13 @@ pub fn get_buck2_root() -> io::Result<Utf8PathBuf> {
     }
 }
 
+pub fn find_buck2_project_root(start: &Path) -> Option<PathBuf> {
+    start
+        .ancestors()
+        .find(|candidate| candidate.join(".buckconfig").is_file())
+        .map(Path::to_path_buf)
+}
+
 /// Check if a platform target exists using buck2 uquery
 pub fn platform_exists(platform_target: &str) -> bool {
     let output = crate::buck2::Buck2Command::uquery()
@@ -501,6 +511,15 @@ pub fn ensure_prerequisites() -> io::Result<()> {
     Ok(())
 }
 
+pub fn append_buck_out_to_gitignore(root: &Path) -> io::Result<()> {
+    let mut git_ignore = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(root.join(".gitignore"))?;
+    writeln!(git_ignore, "/buck-out")?;
+    Ok(())
+}
+
 pub trait UnwrapOrExit<T> {
     fn unwrap_or_exit(self) -> T;
     fn unwrap_or_exit_ctx(self, context: impl std::fmt::Display) -> T;
@@ -531,6 +550,7 @@ impl<T, E: std::fmt::Display> UnwrapOrExit<T> for Result<T, E> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
 
     #[test]
     fn test_is_valid_rustc_target_valid_targets() {
@@ -569,5 +589,38 @@ mod tests {
         if let Ok(platform) = result {
             assert_eq!(platform, "//platforms:x86_64-unknown-linux-gnu");
         }
+    }
+
+    #[test]
+    fn test_find_buck2_project_root_finds_ancestor_buckconfig() {
+        let root = TempDir::new().expect("failed to create temp dir");
+        let nested = root.path().join("crates").join("demo");
+        std::fs::create_dir_all(&nested).expect("failed to create nested directories");
+        std::fs::write(root.path().join(".buckconfig"), "[project]\nignore=.git\n")
+            .expect("failed to write .buckconfig");
+
+        let found = find_buck2_project_root(&nested);
+        assert_eq!(found.as_deref(), Some(root.path()));
+    }
+
+    #[test]
+    fn test_find_buck2_project_root_returns_none_without_buckconfig() {
+        let root = TempDir::new().expect("failed to create temp dir");
+        let nested = root.path().join("crates").join("demo");
+        std::fs::create_dir_all(&nested).expect("failed to create nested directories");
+
+        let found = find_buck2_project_root(&nested);
+        assert!(found.is_none());
+    }
+
+    #[test]
+    fn test_append_buck_out_to_gitignore_creates_file_when_missing() {
+        let root = TempDir::new().expect("failed to create temp dir");
+
+        append_buck_out_to_gitignore(root.path()).expect("expected .gitignore to be created");
+
+        let gitignore = std::fs::read_to_string(root.path().join(".gitignore"))
+            .expect("failed to read .gitignore");
+        assert!(gitignore.contains("/buck-out"));
     }
 }

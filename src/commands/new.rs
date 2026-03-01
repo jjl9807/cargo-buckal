@@ -1,6 +1,5 @@
 use std::{
-    fs::OpenOptions,
-    io::Write,
+    path::{Path, PathBuf},
     process::{Command, Stdio, exit},
 };
 
@@ -12,7 +11,9 @@ use crate::{
     buck2::Buck2Command,
     buckal_error, buckal_log, buckal_note,
     bundles::{init_buckal_cell, init_modifier},
-    utils::{UnwrapOrExit, ensure_prerequisites},
+    utils::{
+        UnwrapOrExit, append_buck_out_to_gitignore, ensure_prerequisites, find_buck2_project_root,
+    },
 };
 
 #[derive(Parser, Debug)]
@@ -42,6 +43,10 @@ pub struct NewArgs {
 pub fn execute(args: &NewArgs) {
     // Ensure all prerequisites are installed before proceeding
     ensure_prerequisites().unwrap_or_exit();
+
+    if !args.repo && !args.lite {
+        ensure_new_path_within_buck2_project(&args.path).unwrap_or_exit();
+    }
 
     // Use `cargo new` to initialize the directory
     let mut cargo_cmd = Command::new("cargo");
@@ -91,12 +96,8 @@ pub fn execute(args: &NewArgs) {
             .unwrap_or_exit();
         std::fs::create_dir_all(format!("{}/{}", args.path, RUST_CRATES_ROOT))
             .unwrap_or_exit_ctx("failed to create third-party directory");
-        let mut git_ignore = OpenOptions::new()
-            .create(false)
-            .append(true)
-            .open(format!("{}/.gitignore", args.path))
-            .unwrap_or_exit();
-        writeln!(git_ignore, "/buck-out").unwrap_or_exit();
+        append_buck_out_to_gitignore(Path::new(&args.path))
+            .unwrap_or_exit_ctx("failed to update `.gitignore`");
 
         // Configure the buckal cell in .buckconfig
         let cwd = std::env::current_dir().unwrap_or_exit();
@@ -117,5 +118,62 @@ pub fn execute(args: &NewArgs) {
         buckal_note!(
             "You should manually configure a Cargo workspace before running `cargo buckal new <path>` to create packages."
         );
+    }
+}
+
+fn ensure_new_path_within_buck2_project(path: &str) -> std::io::Result<()> {
+    let cwd = std::env::current_dir()?;
+    let absolute_target = absolutize_path(path, &cwd);
+    let probe_path = if absolute_target.exists() {
+        absolute_target.as_path()
+    } else {
+        absolute_target.parent().unwrap_or(cwd.as_path())
+    };
+
+    if find_buck2_project_root(probe_path).is_some() {
+        return Ok(());
+    }
+
+    Err(std::io::Error::other(format!(
+        "No Buck2 project root (.buckconfig) found for `{}`. \
+Run `cargo buckal new {} --repo` (or `--lite`) to initialize a project first.",
+        probe_path.display(),
+        path
+    )))
+}
+
+fn absolutize_path(path: &str, cwd: &Path) -> PathBuf {
+    let candidate = PathBuf::from(path);
+    if candidate.is_absolute() {
+        candidate
+    } else {
+        cwd.join(candidate)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ensure_new_path_within_buck2_project;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_ensure_new_path_within_buck2_project_accepts_buckconfig_ancestor() {
+        let root = TempDir::new().expect("failed to create temp dir");
+        let package = root.path().join("crates").join("demo");
+        std::fs::write(root.path().join(".buckconfig"), "[project]\nignore=.git\n")
+            .expect("failed to write .buckconfig");
+
+        let result = ensure_new_path_within_buck2_project(package.to_str().unwrap());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_ensure_new_path_within_buck2_project_rejects_missing_buckconfig() {
+        let root = TempDir::new().expect("failed to create temp dir");
+        let package = root.path().join("crates").join("demo");
+        std::fs::create_dir_all(root.path().join("crates")).expect("failed to create parent dir");
+
+        let result = ensure_new_path_within_buck2_project(package.to_str().unwrap());
+        assert!(result.is_err());
     }
 }
