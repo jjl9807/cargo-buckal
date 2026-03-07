@@ -14,19 +14,14 @@ pub enum Rule {
     Load(Load),
     HttpArchive(HttpArchive),
     FileGroup(FileGroup),
+    GitFetch(GitFetch),
     CargoManifest(CargoManifest),
     RustLibrary(RustLibrary),
     RustBinary(RustBinary),
     RustTest(RustTest),
     BuildscriptRun(BuildscriptRun),
 }
-#[derive(Serialize, Debug)]
-#[serde(rename = "alias")]
-pub struct Alias {
-    pub name: String,
-    pub actual: String,
-    pub visibility: Set<String>,
-}
+
 impl Rule {
     pub fn as_rust_rule_mut(&mut self) -> Option<&mut dyn RustRule> {
         match self {
@@ -71,6 +66,14 @@ pub struct HttpArchive {
     pub strip_prefix: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub out: Option<String>,
+}
+
+#[derive(Serialize, Default, Debug)]
+#[serde(rename = "git_fetch")]
+pub struct GitFetch {
+    pub name: String,
+    pub repo: String,
+    pub rev: String,
 }
 
 #[derive(Serialize, Default, Debug)]
@@ -739,6 +742,15 @@ impl HttpArchive {
     }
 }
 
+impl GitFetch {
+    fn from_py_dict(kwargs: &Bound<'_, PyDict>) -> PyResult<Self> {
+        let name: String = get_arg(kwargs, "name");
+        let repo: String = get_arg(kwargs, "repo");
+        let rev: String = get_arg(kwargs, "rev");
+        Ok(GitFetch { name, repo, rev })
+    }
+}
+
 impl FileGroup {
     fn from_py_dict(kwargs: &Bound<'_, PyDict>) -> PyResult<Self> {
         let name: String = get_arg(kwargs, "name");
@@ -793,6 +805,10 @@ def buildscript_run(*args, **kwargs):
 
 @buckal_call
 def http_archive(*args, **kwargs):
+    pass
+
+@buckal_call
+def git_fetch(*args, **kwargs):
     pass
 
 @buckal_call
@@ -860,6 +876,10 @@ def load(*args, **kwargs):
                 "http_archive" => {
                     let rule = HttpArchive::from_py_dict(kwargs)?;
                     buck_rules.insert(func_name.to_string(), Rule::HttpArchive(rule));
+                }
+                "git_fetch" => {
+                    let rule = GitFetch::from_py_dict(kwargs)?;
+                    buck_rules.insert(func_name.to_string(), Rule::GitFetch(rule));
                 }
                 "filegroup" => {
                     let rule = FileGroup::from_py_dict(kwargs)?;

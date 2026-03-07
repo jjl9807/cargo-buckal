@@ -12,7 +12,7 @@ use crate::{
     buckal_note, buckal_warn,
     context::BuckalContext,
     platform::{Os, oses_from_platform, platform_is_target_only},
-    utils::get_buck2_root,
+    utils::{get_buck2_root, is_third_party},
 };
 
 pub(super) fn dep_kind_matches(target_kind: CargoTargetKind, dep_kind: DependencyKind) -> bool {
@@ -92,11 +92,7 @@ fn resolve_buckal_name(dep_bin_targets: &[&Target], dep_lib_targets: &[&Target])
     }
 }
 
-fn resolve_dep_label(
-    dep: &NodeDep,
-    dep_package: &Package,
-    use_workspace_alias: bool,
-) -> Result<(String, Option<String>)> {
+fn resolve_dep_label(dep: &NodeDep, dep_package: &Package) -> Result<(String, Option<String>)> {
     let dep_package_name = dep_package.name.to_string();
     let is_renamed = dep.name != dep_package_name.replace("-", "_");
     let alias = if is_renamed {
@@ -105,7 +101,7 @@ fn resolve_dep_label(
         None
     };
 
-    if dep_package.source.is_none() {
+    if !is_third_party(dep_package) {
         let label = resolve_first_party_label(dep_package).with_context(|| {
             format!(
                 "failed to resolve first-party label for `{}`",
@@ -116,14 +112,10 @@ fn resolve_dep_label(
     } else {
         // third-party dependency
         Ok((
-            if use_workspace_alias {
-                format!("//third-party/rust:{}", dep_package.name)
-            } else {
-                format!(
-                    "//{RUST_CRATES_ROOT}/{}/{}:{}",
-                    dep_package.name, dep_package.version, dep_package.name
-                )
-            },
+            format!(
+                "//{RUST_CRATES_ROOT}/{}/{}:{}",
+                dep_package.name, dep_package.version, dep_package.name
+            ),
             alias,
         ))
     }
@@ -213,11 +205,8 @@ pub(super) fn set_deps(
     node: &Node,
     packages_map: &HashMap<PackageId, Package>,
     kind: CargoTargetKind,
-    ctx: &BuckalContext,
+    _ctx: &BuckalContext,
 ) -> Result<()> {
-    let use_workspace_alias =
-        ctx.repo_config.inherit_workspace_deps && ctx.workspace_members.contains(&node.id);
-
     for dep in &node.deps {
         let Some(dep_package) = packages_map.get(&dep.pkg) else {
             continue;
@@ -260,13 +249,12 @@ pub(super) fn set_deps(
             continue;
         }
 
-        let (target_label, alias) = resolve_dep_label(dep, dep_package, use_workspace_alias)
-            .with_context(|| {
-                format!(
-                    "failed to resolve dependency label for '{}' (package '{}')",
-                    dep.name, dep_package.name
-                )
-            })?;
+        let (target_label, alias) = resolve_dep_label(dep, dep_package).with_context(|| {
+            format!(
+                "failed to resolve dependency label for '{}' (package '{}')",
+                dep.name, dep_package.name
+            )
+        })?;
 
         if unconditional {
             insert_dep(rust_rule, &target_label, alias.as_deref(), None)?;

@@ -1,13 +1,16 @@
-use cargo_metadata::MetadataCommand;
-use cargo_metadata::camino::Utf8PathBuf;
-use cargo_platform::Cfg;
-use colored::Colorize;
-use inquire::Select;
 use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::{io, process::Command, str::FromStr};
+
+use anyhow::Result;
+use cargo_metadata::camino::Utf8PathBuf;
+use cargo_metadata::{MetadataCommand, Package};
+use cargo_platform::Cfg;
+use cargo_util_schemas::core::PackageIdSpec;
+use colored::Colorize;
+use inquire::Select;
 
 use crate::RUST_CRATES_ROOT;
 use crate::buck2::Buck2Command;
@@ -313,8 +316,8 @@ pub fn ensure_buck2_installed() -> io::Result<()> {
     Ok(())
 }
 
+/// Get the root directory of the Buck2 project by running `buck2 root --kind project`.
 pub fn get_buck2_root() -> io::Result<Utf8PathBuf> {
-    // This function should return the root directory of the Buck2 project.
     let out_put = Buck2Command::root().arg("--kind").arg("project").output()?;
     if out_put.status.success() {
         let path_str = String::from_utf8_lossy(&out_put.stdout).trim().to_string();
@@ -543,6 +546,24 @@ impl<T, E: std::fmt::Display> UnwrapOrExit<T> for Result<T, E> {
                 buckal_error!("{}:\n{}", context, error);
                 std::process::exit(1);
             }
+        }
+    }
+}
+
+/// Check if a package is a third-party dependency
+pub fn is_third_party(package: &Package) -> bool {
+    if package.source.is_some() {
+        true
+    } else {
+        let package_id_spec =
+            PackageIdSpec::parse(&package.id.repr).unwrap_or_exit_ctx("failed to parse package ID");
+        // println!("{:#?}", package_id_spec);
+        let buck2_root = get_buck2_root().unwrap_or_exit_ctx("failed to get Buck2 root");
+        if let Some(url) = package_id_spec.url() {
+            url.path().strip_prefix(buck2_root.as_str()).is_none()
+        } else {
+            // If there's no URL, we treat it as a first-party package
+            false
         }
     }
 }

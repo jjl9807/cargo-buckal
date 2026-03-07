@@ -50,7 +50,7 @@ pub(super) fn patch_root_windows_rustc_flags(
 
     for lib_target in lib_targets {
         if lib_target.test {
-            rust_test_names.insert(format!("{}-unittest", lib_target.name));
+            rust_test_names.insert("unittest".to_owned());
         }
     }
 
