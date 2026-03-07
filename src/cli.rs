@@ -198,7 +198,7 @@ mod tests {
                 Some(BuckalSubCommands::Build(build_args)) => {
                     let err = validate_target_triple(build_args.target.as_deref().unwrap())
                         .expect_err("expected invalid target triple to fail validation");
-                    assert!(err.contains("not a valid rustc target"));
+                    assert!(err.to_string().contains("not a valid rustc target"));
                 }
                 other => panic!("expected build subcommand, got {other:?}"),
             },
@@ -215,7 +215,7 @@ mod tests {
                 Some(BuckalSubCommands::Test(test_args)) => {
                     let err = validate_target_triple(test_args.target.as_deref().unwrap())
                         .expect_err("expected invalid target triple to fail validation");
-                    assert!(err.contains("not a valid rustc target"));
+                    assert!(err.to_string().contains("not a valid rustc target"));
                 }
                 other => panic!("expected test subcommand, got {other:?}"),
             },

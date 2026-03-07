@@ -96,10 +96,9 @@ fn windows_import_lib_flags(ctx: &BuckalContext) -> WindowsImportLibFlags {
             .collect();
         matches.sort_by(|a, b| a.version.cmp(&b.version));
         for package in matches {
-            let pkg_name = package.name.to_string();
             out.push(format!(
-                "@$(location //{}/{}/{}:{}-build-script-run[rustc_flags])",
-                RUST_CRATES_ROOT, pkg_name, package.version, pkg_name
+                "@$(location //{}/{}/{}:build-script-run[rustc_flags])",
+                RUST_CRATES_ROOT, package.name, package.version
             ));
         }
     };

@@ -2,9 +2,10 @@ use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::{io, process::Command, str::FromStr};
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use cargo_metadata::camino::Utf8PathBuf;
 use cargo_metadata::{MetadataCommand, Package};
 use cargo_platform::Cfg;
@@ -317,15 +318,21 @@ pub fn ensure_buck2_installed() -> io::Result<()> {
 }
 
 /// Get the root directory of the Buck2 project by running `buck2 root --kind project`.
-pub fn get_buck2_root() -> io::Result<Utf8PathBuf> {
-    let out_put = Buck2Command::root().arg("--kind").arg("project").output()?;
-    if out_put.status.success() {
-        let path_str = String::from_utf8_lossy(&out_put.stdout).trim().to_string();
-        Ok(Utf8PathBuf::from(path_str))
+pub fn get_buck2_root() -> Result<Utf8PathBuf> {
+    static BUCK2_PROJECT_ROOT: OnceLock<Utf8PathBuf> = OnceLock::new();
+
+    if let Some(path) = BUCK2_PROJECT_ROOT.get() {
+        return Ok(path.clone());
+    }
+
+    let output = Buck2Command::root().arg("--kind").arg("project").output()?;
+    if output.status.success() {
+        let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let path = Utf8PathBuf::from(path_str);
+        let _ = BUCK2_PROJECT_ROOT.set(path.clone());
+        Ok(path)
     } else {
-        Err(io::Error::other(
-            String::from_utf8_lossy(&out_put.stderr).to_string(),
-        ))
+        bail!(String::from_utf8_lossy(&output.stderr).to_string())
     }
 }
 
@@ -348,15 +355,15 @@ pub fn platform_exists(platform_target: &str) -> bool {
     }
 }
 
-pub fn check_buck2_package() -> io::Result<()> {
+pub fn check_buck2_package() -> Result<()> {
     // This function checks if the current directory is a valid Buck2 package.
     let cwd = std::env::current_dir().expect("Failed to get current directory");
     let buck_file = cwd.join("BUCK");
     if !buck_file.exists() {
-        return Err(io::Error::other(format!(
+        bail!(
             "could not find `BUCK` in `{}`. Are you in a Buck2 package?",
             cwd.display(),
-        )));
+        );
     }
     Ok(())
 }
@@ -393,24 +400,24 @@ pub fn is_valid_rustc_target(triple: &str) -> bool {
 
 /// Validate a target triple: check if it's valid for rustc and if the corresponding
 /// Buck2 platform exists
-pub fn validate_target_triple(triple: &str) -> Result<String, String> {
+pub fn validate_target_triple(triple: &str) -> Result<String> {
     // Check if it's a valid rustc target
     if !is_valid_rustc_target(triple) {
-        return Err(format!(
+        bail!(
             "invalid target triple '{}': not a valid rustc target. \
              Run 'rustc --print target-list' to see available targets.",
             triple
-        ));
+        );
     }
 
     // Check if the corresponding Buck2 platform exists
     let platform = format!("//platforms:{}", triple);
     if !platform_exists(&platform) {
-        return Err(format!(
+        bail!(
             "platform '{}' does not exist in Buck2. \
              Ensure the platform is defined in //platforms/BUCK.",
             platform
-        ));
+        );
     }
 
     Ok(platform)
@@ -428,11 +435,11 @@ pub fn get_cfgs() -> Vec<Cfg> {
         .collect()
 }
 
-pub fn get_cache_path() -> io::Result<Utf8PathBuf> {
+pub fn get_cache_path() -> Result<Utf8PathBuf> {
     Ok(get_buck2_root()?.join("buckal.snap"))
 }
 
-pub fn get_vendor_dir(name: &str, version: &str) -> io::Result<Utf8PathBuf> {
+pub fn get_vendor_dir(name: &str, version: &str) -> Result<Utf8PathBuf> {
     Ok(get_buck2_root()?.join(format!("{RUST_CRATES_ROOT}/{}/{}", name, version)))
 }
 
@@ -557,7 +564,6 @@ pub fn is_third_party(package: &Package) -> bool {
     } else {
         let package_id_spec =
             PackageIdSpec::parse(&package.id.repr).unwrap_or_exit_ctx("failed to parse package ID");
-        // println!("{:#?}", package_id_spec);
         let buck2_root = get_buck2_root().unwrap_or_exit_ctx("failed to get Buck2 root");
         if let Some(url) = package_id_spec.url() {
             url.path().strip_prefix(buck2_root.as_str()).is_none()
@@ -596,8 +602,8 @@ mod tests {
         let result = validate_target_triple("invalid-target-triple");
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(err.contains("not a valid rustc target"));
-        assert!(err.contains("invalid-target-triple"));
+        assert!(err.to_string().contains("not a valid rustc target"));
+        assert!(err.to_string().contains("invalid-target-triple"));
     }
 
     #[test]
