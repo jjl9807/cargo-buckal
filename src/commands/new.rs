@@ -6,7 +6,7 @@ use std::{
 use clap::Parser;
 
 use crate::{
-    RUST_CRATES_ROOT,
+    RUST_CRATES_ROOT, RUST_GIT_ROOT,
     assets::extract_buck2_assets,
     buck2::Buck2Command,
     buckal_error, buckal_log, buckal_note,
@@ -95,6 +95,8 @@ pub fn execute(args: &NewArgs) {
             .execute()
             .unwrap_or_exit();
         std::fs::create_dir_all(format!("{}/{}", args.path, RUST_CRATES_ROOT))
+            .unwrap_or_exit_ctx("failed to create third-party directory");
+        std::fs::create_dir_all(format!("{}/{}", args.path, RUST_GIT_ROOT))
             .unwrap_or_exit_ctx("failed to create third-party directory");
         append_buck_out_to_gitignore(Path::new(&args.path))
             .unwrap_or_exit_ctx("failed to update `.gitignore`");

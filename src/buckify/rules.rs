@@ -1,19 +1,25 @@
 use std::{collections::BTreeSet as Set, vec};
 
 use cargo_metadata::{Node, Package, camino::Utf8PathBuf};
+use cargo_util_schemas::core::{PackageIdSpec, SourceKind};
 use itertools::Itertools;
 
 use crate::{
     buck::{Load, Rule, RustRule},
+    buckal_error, buckal_note,
     context::BuckalContext,
     utils::{UnwrapOrExit, get_vendor_dir},
 };
 
 use super::emit::{
     emit_buildscript_build, emit_buildscript_run, emit_cargo_manifest, emit_filegroup,
-    emit_http_archive, emit_rust_binary, emit_rust_library, emit_rust_test, patch_with_buildscript,
+    emit_git_fetch, emit_http_archive, emit_rust_binary, emit_rust_library, emit_rust_test,
+    patch_with_buildscript,
 };
 
+/// Buckifies a third-party dependency into a list of BUCK rules.
+///
+/// This includes generating rules for the library target, and if a build script is present, also generating rules for the build script and patching the library rule accordingly.
 pub fn buckify_dep_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
     let package = ctx.packages_map.get(&node.id).unwrap().to_owned();
 
@@ -34,16 +40,43 @@ pub fn buckify_dep_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
         })
         .expect("No library target found");
 
-    let http_archive = emit_http_archive(&package, ctx);
-    buck_rules.push(Rule::HttpArchive(http_archive));
+    // Generate rules to vendor the dependency source code
+    let package_id_spec =
+        PackageIdSpec::parse(&package.id.repr).unwrap_or_exit_ctx("failed to parse package ID");
 
-    let cargo_manifest = emit_cargo_manifest(&package);
+    match package_id_spec.kind().unwrap() {
+        SourceKind::Registry => {
+            let http_archive = emit_http_archive(&package, ctx);
+            buck_rules.push(Rule::HttpArchive(http_archive));
+        }
+        SourceKind::Path => {
+            buckal_error!(
+                "Local path ({}) is not supported for third-party packages.",
+                package_id_spec.url().unwrap().path()
+            );
+            buckal_note!(
+                "Please consider importing `{}` with registry or git source instead, or if it's a local package, move it to the workspace and it will be treated as a root package.",
+                package.name
+            );
+            std::process::exit(1);
+        }
+        SourceKind::Git(_) => {
+            let git_fetch = emit_git_fetch(&package);
+            buck_rules.push(Rule::GitFetch(git_fetch));
+        }
+        _ => {
+            buckal_error!("Unsupported source type for package `{}`.", package.name);
+            buckal_note!("Only registry and git sources are supported for third-party packages.");
+            std::process::exit(1);
+        }
+    }
+
+    let cargo_manifest = emit_cargo_manifest();
     buck_rules.push(Rule::CargoManifest(cargo_manifest));
 
     let rust_library = emit_rust_library(
         &package,
         node,
-        &ctx.packages_map,
         lib_target,
         &manifest_dir,
         &package.name,
@@ -62,29 +95,24 @@ pub fn buckify_dep_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
         // Patch the rust_library rule to support build scripts
         for rule in &mut buck_rules {
             if let Some(rust_rule) = rule.as_rust_rule_mut() {
-                patch_with_buildscript(rust_rule, build_target, &package);
+                patch_with_buildscript(rust_rule, build_target);
             }
         }
 
         // create the build script rule
-        let buildscript_build = emit_buildscript_build(
-            build_target,
-            &package,
-            node,
-            &ctx.packages_map,
-            &manifest_dir,
-            ctx,
-        );
+        let buildscript_build =
+            emit_buildscript_build(build_target, &package, node, &manifest_dir, ctx);
         buck_rules.push(Rule::RustBinary(buildscript_build));
 
         // create the build script run rule
-        let buildscript_run = emit_buildscript_run(&package, node, &ctx.packages_map, build_target);
+        let buildscript_run = emit_buildscript_run(&package, node, build_target, ctx);
         buck_rules.push(Rule::BuildscriptRun(buildscript_run));
     }
 
     buck_rules
 }
 
+/// Buckifies workspace package into a list of BUCK rules, including rules for all targets (bin, lib, test) and handling build scripts if present.
 pub fn buckify_root_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
     let package = ctx.packages_map.get(&node.id).unwrap().to_owned();
 
@@ -118,25 +146,18 @@ pub fn buckify_root_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
     let manifest_dir = package.manifest_path.parent().unwrap().to_owned();
 
     // emit filegroup rule for vendor
-    let filegroup = emit_filegroup(&package);
+    let filegroup = emit_filegroup();
     buck_rules.push(Rule::FileGroup(filegroup));
 
-    let cargo_manifest = emit_cargo_manifest(&package);
+    let cargo_manifest = emit_cargo_manifest();
     buck_rules.push(Rule::CargoManifest(cargo_manifest));
 
     // emit buck rules for bin targets
     for bin_target in &bin_targets {
         let buckal_name = bin_target.name.to_owned();
 
-        let mut rust_binary = emit_rust_binary(
-            &package,
-            node,
-            &ctx.packages_map,
-            bin_target,
-            &manifest_dir,
-            &buckal_name,
-            ctx,
-        );
+        let mut rust_binary =
+            emit_rust_binary(&package, node, bin_target, &manifest_dir, &buckal_name, ctx);
 
         if lib_targets.iter().any(|l| l.name == bin_target.name) {
             // Cargo allows `main.rs` to use items from `lib.rs` via the crate's own name by default.
@@ -156,31 +177,15 @@ pub fn buckify_root_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
             lib_target.name.to_owned()
         };
 
-        let rust_library = emit_rust_library(
-            &package,
-            node,
-            &ctx.packages_map,
-            lib_target,
-            &manifest_dir,
-            &buckal_name,
-            ctx,
-        );
+        let rust_library =
+            emit_rust_library(&package, node, lib_target, &manifest_dir, &buckal_name, ctx);
 
         buck_rules.push(Rule::RustLibrary(rust_library));
 
         if !ctx.repo_config.ignore_tests && lib_target.test {
             // If the library target has inline tests, emit a rust_test rule for it
-            let buckal_name = format!("{}-unittest", lib_target.name);
-
-            let rust_test = emit_rust_test(
-                &package,
-                node,
-                &ctx.packages_map,
-                lib_target,
-                &manifest_dir,
-                &buckal_name,
-                ctx,
-            );
+            let rust_test =
+                emit_rust_test(&package, node, lib_target, &manifest_dir, "unittest", ctx);
 
             buck_rules.push(Rule::RustTest(rust_test));
         }
@@ -194,7 +199,6 @@ pub fn buckify_root_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
             let mut rust_test = emit_rust_test(
                 &package,
                 node,
-                &ctx.packages_map,
                 test_target,
                 &manifest_dir,
                 &buckal_name,
@@ -234,33 +238,27 @@ pub fn buckify_root_node(node: &Node, ctx: &BuckalContext) -> Vec<Rule> {
         // Patch the rust_library and rust_binary rules to support build scripts
         for rule in &mut buck_rules {
             if let Some(rust_rule) = rule.as_rust_rule_mut() {
-                patch_with_buildscript(rust_rule, build_target, &package);
+                patch_with_buildscript(rust_rule, build_target);
             }
         }
 
         // create the build script rule
-        let buildscript_build = emit_buildscript_build(
-            build_target,
-            &package,
-            node,
-            &ctx.packages_map,
-            &manifest_dir,
-            ctx,
-        );
+        let buildscript_build =
+            emit_buildscript_build(build_target, &package, node, &manifest_dir, ctx);
         buck_rules.push(Rule::RustBinary(buildscript_build));
 
         // create the build script run rule
-        let buildscript_run = emit_buildscript_run(&package, node, &ctx.packages_map, build_target);
+        let buildscript_run = emit_buildscript_run(&package, node, build_target, ctx);
         buck_rules.push(Rule::BuildscriptRun(buildscript_run));
     }
 
     buck_rules
 }
 
-/// Vendors the package sources to `third-party/rust/crates/<package_name>/<version>` and returns the path.
+/// Vendors the package sources to `third-party` and returns the path.
 pub fn vendor_package(package: &Package) -> Utf8PathBuf {
-    let vendor_dir = get_vendor_dir(&package.name, &package.version.to_string())
-        .unwrap_or_exit_ctx("failed to get vendor directory");
+    let vendor_dir =
+        get_vendor_dir(&package.id).unwrap_or_exit_ctx("failed to get vendor directory");
     if !vendor_dir.exists() {
         std::fs::create_dir_all(&vendor_dir).expect("Failed to create target directory");
     }
@@ -268,6 +266,7 @@ pub fn vendor_package(package: &Package) -> Utf8PathBuf {
     vendor_dir
 }
 
+/// Generate the content of the BUCK file based on the given rules, including conditional load statements for used rule types.
 pub fn gen_buck_content(rules: &[Rule]) -> String {
     // Analyze which rule types are present to build conditional load statements
     let mut has_cargo_manifest = false;
@@ -417,7 +416,6 @@ mod tests {
             checksums_map: HashMap::new(),
             workspace_root: Utf8PathBuf::from("/tmp"),
             no_merge: false,
-            workspace_members: vec![pkg.id.clone()],
         };
 
         let rules = buckify_root_node(&node, &ctx);
@@ -464,7 +462,6 @@ mod tests {
             checksums_map: HashMap::new(),
             workspace_root: Utf8PathBuf::from("/tmp"),
             no_merge: false,
-            workspace_members: vec![pkg.id.clone()],
         };
 
         let rules = buckify_root_node(&node, &ctx);

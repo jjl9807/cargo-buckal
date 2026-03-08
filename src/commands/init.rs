@@ -6,7 +6,7 @@ use std::{
 use clap::Parser;
 
 use crate::{
-    RUST_CRATES_ROOT,
+    RUST_CRATES_ROOT, RUST_GIT_ROOT,
     assets::extract_buck2_assets,
     buck2::Buck2Command,
     buckal_error, buckal_log, buckal_note,
@@ -81,15 +81,14 @@ pub fn execute(args: &InitArgs) {
         buckal_log!("Creating", "buck2 repository");
         std::fs::remove_dir_all("./src").unwrap_or_exit();
         std::fs::remove_file("./Cargo.toml").unwrap_or_exit();
-        buckal_note!(
-            "You should manually configure a Cargo workspace before running `cargo buckal new <path>` to create packages."
-        );
     }
 
     if args.repo || args.lite {
         // Init a new buck2 repo
         Buck2Command::init().execute().unwrap_or_exit();
         std::fs::create_dir_all(RUST_CRATES_ROOT)
+            .unwrap_or_exit_ctx("failed to create third-party directory");
+        std::fs::create_dir_all(RUST_GIT_ROOT)
             .unwrap_or_exit_ctx("failed to create third-party directory");
         let cwd = std::env::current_dir().unwrap_or_exit();
         append_buck_out_to_gitignore(&cwd).unwrap_or_exit_ctx("failed to update `.gitignore`");

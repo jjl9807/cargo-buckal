@@ -1,17 +1,21 @@
-use cargo_metadata::MetadataCommand;
-use cargo_metadata::camino::Utf8PathBuf;
-use cargo_platform::Cfg;
-use colored::Colorize;
-use inquire::Select;
 use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::{io, process::Command, str::FromStr};
 
-use crate::RUST_CRATES_ROOT;
+use anyhow::{Result, bail};
+use cargo_metadata::camino::Utf8PathBuf;
+use cargo_metadata::{MetadataCommand, PackageId};
+use cargo_platform::Cfg;
+use cargo_util_schemas::core::{PackageIdSpec, SourceKind};
+use colored::Colorize;
+use inquire::Select;
+
 use crate::buck2::Buck2Command;
 use crate::cache::BuckalCache;
+use crate::{RUST_CRATES_ROOT, RUST_GIT_ROOT};
 
 #[macro_export]
 macro_rules! buckal_log {
@@ -313,16 +317,22 @@ pub fn ensure_buck2_installed() -> io::Result<()> {
     Ok(())
 }
 
-pub fn get_buck2_root() -> io::Result<Utf8PathBuf> {
-    // This function should return the root directory of the Buck2 project.
-    let out_put = Buck2Command::root().arg("--kind").arg("project").output()?;
-    if out_put.status.success() {
-        let path_str = String::from_utf8_lossy(&out_put.stdout).trim().to_string();
-        Ok(Utf8PathBuf::from(path_str))
+/// Get the root directory of the Buck2 project by running `buck2 root --kind project`.
+pub fn get_buck2_root() -> Result<Utf8PathBuf> {
+    static BUCK2_PROJECT_ROOT: OnceLock<Utf8PathBuf> = OnceLock::new();
+
+    if let Some(path) = BUCK2_PROJECT_ROOT.get() {
+        return Ok(path.clone());
+    }
+
+    let output = Buck2Command::root().arg("--kind").arg("project").output()?;
+    if output.status.success() {
+        let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let path = Utf8PathBuf::from(path_str);
+        let _ = BUCK2_PROJECT_ROOT.set(path.clone());
+        Ok(path)
     } else {
-        Err(io::Error::other(
-            String::from_utf8_lossy(&out_put.stderr).to_string(),
-        ))
+        bail!(String::from_utf8_lossy(&output.stderr).to_string())
     }
 }
 
@@ -345,15 +355,15 @@ pub fn platform_exists(platform_target: &str) -> bool {
     }
 }
 
-pub fn check_buck2_package() -> io::Result<()> {
+pub fn check_buck2_package() -> Result<()> {
     // This function checks if the current directory is a valid Buck2 package.
     let cwd = std::env::current_dir().expect("Failed to get current directory");
     let buck_file = cwd.join("BUCK");
     if !buck_file.exists() {
-        return Err(io::Error::other(format!(
+        bail!(
             "could not find `BUCK` in `{}`. Are you in a Buck2 package?",
             cwd.display(),
-        )));
+        );
     }
     Ok(())
 }
@@ -390,24 +400,24 @@ pub fn is_valid_rustc_target(triple: &str) -> bool {
 
 /// Validate a target triple: check if it's valid for rustc and if the corresponding
 /// Buck2 platform exists
-pub fn validate_target_triple(triple: &str) -> Result<String, String> {
+pub fn validate_target_triple(triple: &str) -> Result<String> {
     // Check if it's a valid rustc target
     if !is_valid_rustc_target(triple) {
-        return Err(format!(
+        bail!(
             "invalid target triple '{}': not a valid rustc target. \
              Run 'rustc --print target-list' to see available targets.",
             triple
-        ));
+        );
     }
 
     // Check if the corresponding Buck2 platform exists
     let platform = format!("//platforms:{}", triple);
     if !platform_exists(&platform) {
-        return Err(format!(
+        bail!(
             "platform '{}' does not exist in Buck2. \
              Ensure the platform is defined in //platforms/BUCK.",
             platform
-        ));
+        );
     }
 
     Ok(platform)
@@ -425,17 +435,49 @@ pub fn get_cfgs() -> Vec<Cfg> {
         .collect()
 }
 
-pub fn get_cache_path() -> io::Result<Utf8PathBuf> {
+pub fn get_cache_path() -> Result<Utf8PathBuf> {
     Ok(get_buck2_root()?.join("buckal.snap"))
 }
 
-pub fn get_vendor_dir(name: &str, version: &str) -> io::Result<Utf8PathBuf> {
-    Ok(get_buck2_root()?.join(format!("{RUST_CRATES_ROOT}/{}/{}", name, version)))
+/// Get the relative vendor path for a given package
+///
+/// This function determines the vendor path based on the package source:
+/// - For registry packages, it returns `third-party/rust/crates/<package>/<version>`
+/// - For git packages, it returns `third-party/rust/git/<package>/<version>`
+pub fn get_vendor_path_relative(package_id: &PackageId) -> Result<String> {
+    let package_id_spec = PackageIdSpec::parse(&package_id.repr)?;
+    match package_id_spec
+        .kind()
+        .expect("failed to extract package source kind")
+    {
+        SourceKind::Registry => Ok(format!(
+            "{RUST_CRATES_ROOT}/{}/{}",
+            package_id_spec.name(),
+            package_id_spec
+                .version()
+                .expect("failed to extract package version")
+        )),
+        SourceKind::Git(_) => Ok(format!(
+            "{RUST_GIT_ROOT}/{}/{}",
+            package_id_spec.name(),
+            package_id_spec
+                .version()
+                .expect("failed to extract package version")
+        )),
+        _ => bail!(
+            "unsupported source kind for package '{}'",
+            package_id_spec.name()
+        ),
+    }
 }
 
+/// Get the vendor directory for a given package
+pub fn get_vendor_dir(package_id: &PackageId) -> Result<Utf8PathBuf> {
+    Ok(get_buck2_root()?.join(get_vendor_path_relative(package_id)?))
+}
+
+/// Retrieve the last saved BuckalCache from the cache file, or create a new one if the cache file does not exist.
 pub fn get_last_cache() -> BuckalCache {
-    // This function retrieves the last saved BuckalCache from the cache file.
-    // If the cache file does not exist, it returns a snapshot of the current state.
     if let Ok(last_cache) = BuckalCache::load() {
         last_cache
     } else {
@@ -547,6 +589,25 @@ impl<T, E: std::fmt::Display> UnwrapOrExit<T> for Result<T, E> {
     }
 }
 
+/// Get the file path from a URL on Unix platforms (straightforward)
+#[cfg(unix)]
+pub fn get_url_path(url: &url::Url) -> String {
+    url.path().to_owned()
+}
+
+/// Get the file path from a URL on non-Unix platforms, handling drive letters and backslashes
+///
+/// On Windows, Cargo may produce file URLs that look like `file:///C:/path/to/file`, which includes a leading slash before the drive letter. We need to trim that leading slash and convert forward slashes to backslashes to get a valid Windows path.
+#[cfg(not(unix))]
+pub fn get_url_path(url: &url::Url) -> String {
+    let path = url.path();
+    if path.starts_with('/') && path.chars().nth(2) == Some(':') {
+        path[1..].replace('/', "\\").to_owned()
+    } else {
+        path.to_owned()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -575,8 +636,8 @@ mod tests {
         let result = validate_target_triple("invalid-target-triple");
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(err.contains("not a valid rustc target"));
-        assert!(err.contains("invalid-target-triple"));
+        assert!(err.to_string().contains("not a valid rustc target"));
+        assert!(err.to_string().contains("invalid-target-triple"));
     }
 
     #[test]

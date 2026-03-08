@@ -1,17 +1,13 @@
-use std::{
-    collections::BTreeMap,
-    io::{BufWriter, Write},
-};
-
+use cargo_metadata::Package;
+use cargo_util_schemas::core::PackageIdSpec;
 use regex::Regex;
 
 use crate::{
-    RUST_CRATES_ROOT,
-    buck::{Alias, parse_buck_file, patch_buck_rules},
+    buck::{parse_buck_file, patch_buck_rules},
     buckal_log,
     cache::{BuckalChange, ChangeType},
     context::BuckalContext,
-    utils::{UnwrapOrExit, get_buck2_root, get_vendor_dir},
+    utils::{UnwrapOrExit, get_buck2_root, get_url_path, get_vendor_dir},
 };
 
 use super::{
@@ -21,7 +17,7 @@ use super::{
 impl BuckalChange {
     pub fn apply(&self, ctx: &BuckalContext) {
         // This function applies changes to the BUCK files of detected packages in the cache diff, but skips the root package.
-        let re = Regex::new(r"^([^+#]+)\+([^#]+)#([^@]+)@([^+#]+)(?:\+(.+))?$")
+        let re: Regex = Regex::new(r"^([^+#]+)\+([^#]+)#([^@]+)@([^+#]+)(?:\+(.+))?$")
             .expect("error creating regex");
         let skip_pattern = format!("path+file://{}", ctx.workspace_root);
 
@@ -48,14 +44,14 @@ impl BuckalChange {
                         );
 
                         // Vendor package sources
-                        let vendor_dir = if package.source.is_none() {
+                        let vendor_dir = if !is_third_party(package) {
                             package.manifest_path.parent().unwrap().to_owned()
                         } else {
                             vendor_package(package)
                         };
 
                         // Generate BUCK rules
-                        let mut buck_rules = if package.source.is_none() {
+                        let mut buck_rules = if !is_third_party(package) {
                             buckify_root_node(node, ctx)
                         } else {
                             buckify_dep_node(node, ctx)
@@ -96,8 +92,8 @@ impl BuckalChange {
                     let version = &caps[4];
 
                     buckal_log!("Removing", format!("{} v{}", name, version));
-                    let vendor_dir = get_vendor_dir(name, version)
-                        .unwrap_or_exit_ctx("failed to get vendor directory");
+                    let vendor_dir =
+                        get_vendor_dir(id).unwrap_or_exit_ctx("failed to get vendor directory");
                     if vendor_dir.exists() {
                         std::fs::remove_dir_all(&vendor_dir)
                             .expect("Failed to remove vendor directory");
@@ -122,14 +118,6 @@ pub fn flush_root(ctx: &BuckalContext) {
         buckal_log!("Flushing", format!("{} v{}", root.name, root.version));
         let root_node = ctx.nodes_map.get(&root.id).expect("Root node not found");
 
-        if ctx.repo_config.inherit_workspace_deps {
-            buckal_log!(
-                "Generating",
-                "third-party alias rules (inherit_workspace_deps=true)"
-            );
-            generate_third_party_aliases(ctx);
-        }
-
         let manifest_dir = root
             .manifest_path
             .parent()
@@ -148,64 +136,20 @@ pub fn flush_root(ctx: &BuckalContext) {
     }
 }
 
-fn generate_third_party_aliases(ctx: &BuckalContext) {
-    let root = get_buck2_root().expect("failed to get buck2 root");
-    let dir = root.join("third-party/rust");
-    std::fs::create_dir_all(&dir).expect("failed to create third-party/rust dir");
-
-    let buck_file = dir.join("BUCK");
-
-    let mut grouped: BTreeMap<String, Vec<&cargo_metadata::Package>> = BTreeMap::new();
-
-    for (pkg_id, pkg) in &ctx.packages_map {
-        // only workspace members (first-party)
-        if pkg.source.is_some() {
-            continue;
-        }
-
-        let node = match ctx.nodes_map.get(pkg_id) {
-            Some(n) => n,
-            None => continue,
-        };
-
-        for dep in &node.deps {
-            let dep_pkg = ctx.packages_map.get(&dep.pkg).unwrap();
-            if dep_pkg.source.is_some() {
-                grouped
-                    .entry(dep_pkg.name.to_string())
-                    .or_default()
-                    .push(dep_pkg);
-            }
+/// Check if a package is a third-party dependency
+pub(super) fn is_third_party(package: &Package) -> bool {
+    if package.source.is_some() {
+        true
+    } else {
+        let package_id_spec =
+            PackageIdSpec::parse(&package.id.repr).unwrap_or_exit_ctx("failed to parse package ID");
+        let buck2_root = get_buck2_root().unwrap_or_exit_ctx("failed to get Buck2 root");
+        if let Some(url) = package_id_spec.url() {
+            let url_path = get_url_path(url);
+            url_path.strip_prefix(buck2_root.as_str()).is_none()
+        } else {
+            // If there's no URL, we treat it as a first-party package
+            false
         }
     }
-
-    let file = std::fs::File::create(&buck_file).expect("failed to create third-party/rust/BUCK");
-    let mut writer = BufWriter::new(file);
-
-    writeln!(writer, "# @generated by cargo-buckal\n").expect("failed to write header");
-
-    for (crate_name, mut versions) in grouped {
-        versions.sort_by(|a, b| a.version.cmp(&b.version));
-        let latest = versions.last().expect("empty version list");
-
-        let actual = format!(
-            "//{RUST_CRATES_ROOT}/{}/{}:{}",
-            crate_name, latest.version, crate_name
-        );
-
-        let rule = Alias {
-            name: crate_name.clone(),
-            actual,
-            visibility: ["PUBLIC"].into_iter().map(String::from).collect(),
-        };
-        let rendered = serde_starlark::to_string(&rule).expect("failed to serialize alias");
-        writeln!(writer, "{}", rendered).expect("write failed");
-    }
-
-    writer.flush().expect("failed to flush alias rules");
-
-    buckal_log!(
-        "Generated",
-        format!("third-party alias rules at {}", buck_file)
-    );
 }

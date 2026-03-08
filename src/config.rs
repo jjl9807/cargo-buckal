@@ -163,7 +163,6 @@ fn set_permissions(_file: &File) -> Result<()> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct RepoConfig {
-    pub inherit_workspace_deps: bool,
     pub align_cells: bool,
     pub ignore_tests: bool,
     pub patch_fields: Set<String>,
@@ -172,7 +171,6 @@ pub struct RepoConfig {
 impl Default for RepoConfig {
     fn default() -> Self {
         Self {
-            inherit_workspace_deps: false,
             align_cells: false,
             ignore_tests: true,
             patch_fields: Set::new(),
