@@ -111,7 +111,19 @@ impl BuckalChange {
         // Export workspace manifest for virtual workspace
         if !workspace_emitted && ctx.workspace_inherit {
             let buck_path = ctx.workspace_root.join("BUCK");
-            let rules = vec![Rule::ExportFile(emit_export_file())];
+            let mut rules = if buck_path.exists() {
+                parse_buck_file(&buck_path)
+                    .unwrap_or_exit_ctx(format!("Failed to parse {}", buck_path))
+                    .values()
+                    .cloned()
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
+            let export_file = Rule::ExportFile(emit_export_file());
+            if !rules.contains(&export_file) {
+                rules.push(export_file);
+            }
             let buck_content = gen_buck_content(&rules);
             std::fs::write(&buck_path, buck_content).expect("Failed to write BUCK file");
         }

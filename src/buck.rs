@@ -9,7 +9,7 @@ use starlark_syntax::syntax::{AstModule, Dialect};
 
 use crate::buckal_error;
 
-#[derive(Serialize, Debug, PartialEq)]
+#[derive(Serialize, Debug, PartialEq, Clone)]
 #[serde(untagged)]
 pub enum Rule {
     Load(Load),
@@ -51,13 +51,13 @@ pub enum CargoTargetKind {
     Test,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Load {
     pub bzl: String,
     pub items: Set<String>,
 }
 
-#[derive(Serialize, Default, Debug, PartialEq)]
+#[derive(Serialize, Default, Debug, PartialEq, Clone)]
 #[serde(rename = "http_archive")]
 pub struct HttpArchive {
     pub name: String,
@@ -70,7 +70,7 @@ pub struct HttpArchive {
     pub out: Option<String>,
 }
 
-#[derive(Serialize, Default, Debug, PartialEq)]
+#[derive(Serialize, Default, Debug, PartialEq, Clone)]
 #[serde(rename = "git_fetch")]
 pub struct GitFetch {
     pub name: String,
@@ -78,7 +78,7 @@ pub struct GitFetch {
     pub rev: String,
 }
 
-#[derive(Serialize, Default, Debug, PartialEq)]
+#[derive(Serialize, Default, Debug, PartialEq, Clone)]
 #[serde(rename = "cargo_manifest")]
 pub struct CargoManifest {
     pub name: String,
@@ -87,7 +87,7 @@ pub struct CargoManifest {
     pub workspace: Option<String>,
 }
 
-#[derive(Serialize, Default, Debug, PartialEq)]
+#[derive(Serialize, Default, Debug, PartialEq, Clone)]
 #[serde(rename = "export_file")]
 pub struct ExportFile {
     pub name: String,
@@ -95,7 +95,7 @@ pub struct ExportFile {
     pub visibility: Set<String>,
 }
 
-#[derive(Serialize, Default, Debug, PartialEq)]
+#[derive(Serialize, Default, Debug, PartialEq, Clone)]
 #[serde(rename = "rust_library")]
 pub struct RustLibrary {
     pub name: String,
@@ -129,7 +129,7 @@ pub struct RustLibrary {
     pub deps: Set<String>,
 }
 
-#[derive(Serialize, Default, Debug, PartialEq)]
+#[derive(Serialize, Default, Debug, PartialEq, Clone)]
 #[serde(rename = "rust_binary")]
 pub struct RustBinary {
     pub name: String,
@@ -161,7 +161,7 @@ pub struct RustBinary {
     pub deps: Set<String>,
 }
 
-#[derive(Serialize, Default, Debug, PartialEq)]
+#[derive(Serialize, Default, Debug, PartialEq, Clone)]
 #[serde(rename = "rust_test")]
 pub struct RustTest {
     pub name: String,
@@ -193,7 +193,7 @@ pub struct RustTest {
     pub deps: Set<String>,
 }
 
-#[derive(Serialize, Default, Debug, PartialEq)]
+#[derive(Serialize, Default, Debug, PartialEq, Clone)]
 #[serde(rename = "buildscript_run")]
 pub struct BuildscriptRun {
     pub name: String,
@@ -211,13 +211,13 @@ pub struct BuildscriptRun {
     pub visibility: Set<String>,
 }
 
-#[derive(Default, Debug, PartialEq)]
+#[derive(Default, Debug, PartialEq, Clone)]
 pub struct Glob {
     pub include: Set<String>,
     pub exclude: Set<String>,
 }
 
-#[derive(Serialize, Default, Debug, PartialEq)]
+#[derive(Serialize, Default, Debug, PartialEq, Clone)]
 #[serde(rename = "filegroup")]
 pub struct FileGroup {
     pub name: String,
