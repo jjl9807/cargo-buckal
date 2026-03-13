@@ -17,6 +17,7 @@ pub enum Rule {
     FileGroup(FileGroup),
     GitFetch(GitFetch),
     CargoManifest(CargoManifest),
+    ExportFile(ExportFile),
     RustLibrary(RustLibrary),
     RustBinary(RustBinary),
     RustTest(RustTest),
@@ -82,6 +83,16 @@ pub struct GitFetch {
 pub struct CargoManifest {
     pub name: String,
     pub vendor: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
+}
+
+#[derive(Serialize, Default, Debug, PartialEq)]
+#[serde(rename = "export_file")]
+pub struct ExportFile {
+    pub name: String,
+    pub src: String,
+    pub visibility: Set<String>,
 }
 
 #[derive(Serialize, Default, Debug, PartialEq)]
@@ -811,7 +822,25 @@ impl CargoManifest {
     fn from_kwargs(kwargs: &RuleKwargs) -> anyhow::Result<Self> {
         let name = kwargs.get_str("name")?;
         let vendor = kwargs.get_str("vendor")?;
-        Ok(CargoManifest { name, vendor })
+        let workspace = kwargs.get_str_opt("workspace");
+        Ok(CargoManifest {
+            name,
+            vendor,
+            workspace,
+        })
+    }
+}
+
+impl ExportFile {
+    fn from_kwargs(kwargs: &RuleKwargs) -> anyhow::Result<Self> {
+        let name = kwargs.get_str("name")?;
+        let src = kwargs.get_str("src")?;
+        let visibility = kwargs.get_list("visibility");
+        Ok(ExportFile {
+            name,
+            src,
+            visibility,
+        })
     }
 }
 
@@ -855,6 +884,10 @@ fn parse_rule_from_call(
             .inspect_err(|e| buckal_error!("failed to parse cargo_manifest: {}", e))
             .ok()
             .map(Rule::CargoManifest),
+        "export_file" => ExportFile::from_kwargs(&kwargs)
+            .inspect_err(|e| buckal_error!("failed to parse export_file: {}", e))
+            .ok()
+            .map(Rule::ExportFile),
         _ => None,
     }
 }
@@ -866,6 +899,7 @@ fn rule_map_key(rule: &Rule) -> String {
         Rule::FileGroup(r) => format!("filegroup[{}]", r.name),
         Rule::GitFetch(r) => format!("git_fetch[{}]", r.name),
         Rule::CargoManifest(r) => format!("cargo_manifest[{}]", r.name),
+        Rule::ExportFile(r) => format!("export_file[{}]", r.name),
         Rule::RustLibrary(r) => format!("rust_library[{}]", r.name),
         Rule::RustBinary(r) => format!("rust_binary[{}]", r.name),
         Rule::RustTest(r) => format!("rust_test[{}]", r.name),
@@ -1133,6 +1167,7 @@ mod tests {
             Rule::CargoManifest(CargoManifest {
                 name: "manifest".to_string(),
                 vendor: ":vendor".to_string(),
+                workspace: None,
             }),
             Rule::RustBinary(RustBinary {
                 name: "libra".to_string(),
@@ -1380,6 +1415,7 @@ mod tests {
             Rule::CargoManifest(CargoManifest {
                 name: "manifest".to_string(),
                 vendor: ":vendor".to_string(),
+                workspace: None,
             }),
             Rule::RustLibrary(RustLibrary {
                 name: "aws-lc-rs".to_string(),
@@ -1493,6 +1529,7 @@ mod tests {
             Rule::CargoManifest(CargoManifest {
                 name: "manifest".to_string(),
                 vendor: ":vendor".to_string(),
+                workspace: None,
             }),
             Rule::RustLibrary(RustLibrary {
                 name: "git-internal".to_string(),
@@ -1668,6 +1705,7 @@ mod tests {
         let expected = Rule::CargoManifest(CargoManifest {
             name: "example_manifest".to_string(),
             vendor: ":vendor".to_string(),
+            workspace: Some("//:workspace".to_string()),
         });
         let actual = rules
             .get(&rule_map_key(&expected))
@@ -1675,6 +1713,26 @@ mod tests {
         assert_eq!(
             actual, &expected,
             "parsed cargo_manifest rule should match expected"
+        );
+    }
+
+    /// Test parsing a BUCK file with an `export_file` rule that includes all possible fields.
+    #[test]
+    fn test_buck_parser_single_export_file() {
+        let rules = parse_buck_file(get_test_file("single_export_file.BUCK"))
+            .expect("parse should succeed");
+        assert_eq!(rules.len(), 1);
+        let expected = Rule::ExportFile(ExportFile {
+            name: "workspace".to_string(),
+            src: "Cargo.toml".to_string(),
+            visibility: Set::from(["PUBLIC".to_string()]),
+        });
+        let actual = rules
+            .get(&rule_map_key(&expected))
+            .expect("export_file rule should be present");
+        assert_eq!(
+            actual, &expected,
+            "parsed export_file rule should match expected"
         );
     }
 

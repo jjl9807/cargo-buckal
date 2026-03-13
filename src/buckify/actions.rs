@@ -5,6 +5,7 @@ use regex::Regex;
 use crate::{
     buck::{Rule, parse_buck_file, patch_buck_rules},
     buckal_log,
+    buckify::emit::emit_export_file,
     cache::{BuckalChange, ChangeType},
     context::BuckalContext,
     utils::{UnwrapOrExit, get_buck2_root, get_url_path, get_vendor_dir},
@@ -99,6 +100,14 @@ impl BuckalChange {
 }
 
 pub fn flush_root(ctx: &BuckalContext) {
+    // Export workspace manifest
+    // Skip if first-party crate doesn't inherit keys from workspace Cargo.toml
+    if ctx.workspace_inherit {
+        let buck_path = ctx.workspace_root.join("BUCK");
+        let rules = vec![Rule::ExportFile(emit_export_file())];
+        let buck_content = gen_buck_content(&rules);
+        std::fs::write(&buck_path, buck_content).expect("Failed to write BUCK file");
+    }
     // Generate BUCK file for root package
     // Skip if root package is not found (in virtual workspace)
     if let Some(root) = &ctx.root {
