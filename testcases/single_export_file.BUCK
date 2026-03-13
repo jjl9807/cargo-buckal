@@ -1,5 +1,5 @@
 export_file(
-  name = 'workspace',
-  src = 'Cargo.toml',
-  visibility = ["PUBLIC"],
+    name = 'workspace',
+    src = 'Cargo.toml',
+    visibility = ["PUBLIC"],
 )
